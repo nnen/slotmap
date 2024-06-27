@@ -85,7 +85,10 @@ bool FixedSlotMapStorage<TValue, TKey, TCapacity>::FreeSlot(KeyType key)
       return false;
    }
 
-   m_slots[slotIndex].GetPtr()->~TValue();
+   if constexpr (!std::is_trivially_destructible_v<TValue>)
+   {
+      m_slots[slotIndex].GetPtr()->~TValue();
+   }
    
    m_slots[slotIndex].m_nextFreeSlot = m_firstFreeSlot;
    m_firstFreeSlot = static_cast<IndexType>(slotIndex);
@@ -95,6 +98,33 @@ bool FixedSlotMapStorage<TValue, TKey, TCapacity>::FreeSlot(KeyType key)
    --m_size;
    
    return true;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t TCapacity>
+void FixedSlotMapStorage<TValue, TKey, TCapacity>::Clear()
+{
+   for (size_t slotIndex = 0; slotIndex < TCapacity; ++slotIndex)
+   {
+      if (m_liveBits[slotIndex])
+      {
+         if constexpr (!std::is_trivially_destructible_v<TValue>)
+         {
+            m_slots[slotIndex].GetPtr()->~TValue();
+         }
+
+         m_slots[slotIndex].m_nextFreeSlot = m_firstFreeSlot;
+         m_firstFreeSlot = static_cast<IndexType>(slotIndex);
+
+         m_liveBits.reset(slotIndex);
+      }
+   }
+   
+   m_size = 0;
 }
 
 
@@ -238,6 +268,81 @@ bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::FreeSlot(Key
    --m_size;
 
    return true;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator>
+void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::FreeSlotByIndex(IndexType chunkIndex, IndexType slotIndex)
+{
+   Chunk* const chunk = m_chunks[chunkIndex];
+
+   assert(chunk->m_liveBits[slotIndex]);
+   chunk->m_liveBits.reset(slotIndex);
+
+   Slot* const slot = chunk->m_slots + slotIndex;
+   if constexpr (!std::is_trivially_destructible_v<TValue>)
+   {
+      slot->GetPtr()->~TValue();
+   }
+
+   slot->m_nextFreeSlot = -1;
+   if (chunk->m_lastFreeSlot < 0)
+   {
+      assert(chunk->m_firstFreeSlot < 0);
+      chunk->m_firstFreeSlot = slotIndex;
+   }
+   else
+   {
+      assert(chunk->m_firstFreeSlot >= 0);
+      chunk->m_slots[chunk->m_lastFreeSlot].m_nextFreeSlot = slotIndex;
+   }
+   chunk->m_lastFreeSlot = slotIndex;
+   
+   assert(m_size > 0);
+   --m_size;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator>
+void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::Clear()
+{
+   if (m_chunks.size() == 0)
+   {
+      return;
+   }
+
+   m_firstFreeChunk = 0;
+   m_chunks.back()->m_nextFreeChunk = -1;
+
+   for (size_t i = 0; i < m_chunks.size() - 1; ++i)
+   {
+      m_chunks[i]->m_nextFreeChunk = i + 1;
+   }
+
+   for (IndexType chunkIndex = 0; chunkIndex < static_cast<IndexType>(m_chunks.size()); ++chunkIndex)
+   {
+      Chunk* const chunk = m_chunks[chunkIndex];
+
+      for (IndexType slotIndex = 0; slotIndex < ChunkSize; ++slotIndex)
+      {
+         if (chunk->m_liveBits[slotIndex])
+         {
+            FreeSlotByIndex(chunkIndex, slotIndex);
+         }
+      }
+   }
+
+   assert(m_size == 0);
 }
 
 

@@ -78,6 +78,8 @@ struct FixedSlotMapStorage
    
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
+
+   void Clear();
    
    SizeType m_size = 0;
    IndexType m_firstFreeSlot = -1;
@@ -161,7 +163,10 @@ struct ChunkedSlotMapStorage
    void AllocateChunk();
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
+   void FreeSlotByIndex(IndexType chunkIndex, IndexType slotIndex);
  
+   void Clear();
+
    using ChunkAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk>;
    using ChunkPtrAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk*>;
 
@@ -197,7 +202,7 @@ public:
    TKey Emplace(TArgs&&... args);
 
    inline bool Erase(TKey key) { return m_storage.FreeSlot(key); }
-   void Clear();
+   inline void Clear() { m_storage.Clear(); }
 
    inline TValue* GetPtr(TKey key) { return m_storage.GetPtr(key); }
    inline const TValue* GetPtr(TKey key) const { return m_storage.GetPtr(key); }

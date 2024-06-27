@@ -19,8 +19,21 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    googlebenchmark
+    GIT_REPOSITORY "https://github.com/google/benchmark.git"
+    GIT_TAG main
+    PATCH_COMMAND ""
+)
+FetchContent_MakeAvailable(googlebenchmark)
+FetchContent_GetProperties(benchmark SOURCE_DIR BENCHMARK_INCLUDE_DIR)
+include_directories(${BENCHMARK_INCLUDE_DIR})
+
 add_subdirectory("slotmap")
 add_subdirectory("slotmap-tests")
+add_subdirectory("slotmap-benchmark")
 
 #execute_process(
 #    COMMAND ${CMAKE_COMMAND} -E copy_if_different

@@ -165,3 +165,34 @@ TYPED_TEST(SlotMapTest, Fill)
 
    ASSERT_EQ(Traits::MaxCap, map.Size());
 }
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, Clear)
+{
+   MapType map;
+   std::vector<KeyType> keys;
+   keys.reserve(Traits::MaxCap);
+
+   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   {
+      const KeyType key = map.Emplace(static_cast<int>(i));
+      keys.push_back(key);
+   }
+
+   ASSERT_EQ(Traits::MaxCap, map.Size());
+   map.Clear();
+   ASSERT_EQ(0, map.Size());
+
+   for (KeyType key : keys)
+   {
+      const ValueType* ptr = map.GetPtr(key);
+      ASSERT_EQ(nullptr, ptr);
+   }
+
+   for (KeyType key : keys)
+   {
+      ASSERT_FALSE(map.Erase(key));
+   }
+}
+
