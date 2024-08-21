@@ -1,7 +1,7 @@
 #pragma once
 
 #include <type_traits>
-#include <limits>
+#include <climits>
 #include <vector>
 #include <bitset>
 #include <memory>
