@@ -36,6 +36,7 @@ public:
    using ContainerType = slotmap::SlotMap<T>;
    using ValueType = T;
    using KeyType = typename ContainerType::KeyType;
+   using Iterator = KeyType;
 
    inline KeyType Insert(T value)
    {
@@ -57,6 +58,21 @@ public:
       m_slotmap.Clear();
    }
 
+   inline Iterator Begin()
+   {
+      return 0;
+   }
+
+   inline bool FindNext(Iterator& iter)
+   {
+      return m_slotmap.FindNextKey(iter);
+   }
+
+   inline void Increment(Iterator& iter)
+   {
+      iter = m_slotmap.IncrementKey(iter);
+   }
+
    ContainerType m_slotmap;
 };
 
@@ -67,6 +83,8 @@ class StdUnorderedMapContainer
 public:
    using ValueType = T;
    using KeyType = int;
+   using ContainerType = std::unordered_map<KeyType, T>;
+   using Iterator = typename ContainerType::iterator;
 
    inline KeyType Insert(T value)
    {
@@ -96,8 +114,28 @@ public:
       m_stdMap.clear();
    }
 
+   inline auto Begin()
+   {
+      return m_stdMap.begin();
+   }
+
+   inline bool FindNext(Iterator& iter)
+   {
+      return iter != m_stdMap.end();
+   }
+
+   inline void Increment(Iterator& iter)
+   {
+      ++iter;
+   }
+
+   inline ValueType& Get(Iterator& iter)
+   {
+      return iter->second;
+   }
+
    int m_counter = 0;
-   std::unordered_map<KeyType, T> m_stdMap;
+   ContainerType m_stdMap;
 };
 
 
@@ -107,6 +145,7 @@ class VectorWithFreelist
 public:
    using ValueType = T;
    using KeyType = size_t;
+   using Iterator = size_t;
 
    inline KeyType Insert(T value)
    {
@@ -149,6 +188,29 @@ public:
       m_freeList.clear();
    }
 
+   inline size_t Begin()    
+   {
+      return 0;
+   }
+
+   inline bool FindNext(size_t& iter)
+   {
+      while (iter < m_values.size())
+      {
+         if (m_values[iter].m_isAlive)
+         {
+            return true;
+         }
+         ++iter;
+      }
+      return false;
+   }
+
+   inline void Increment(size_t& iter)
+   {
+      ++iter;
+   }
+   
    struct Slot
    {
       bool m_isAlive = false;
@@ -181,6 +243,9 @@ public:
 
 #define ARGS ->Arg(100)->Arg(1000)->Arg(10000)->Arg(100000)->Arg(1000000)->Arg(10000000)
 
+#define MY_BENCHMARK(name_, traits_, traitsName_) \
+   BENCHMARK_TEMPLATE(name_, traits_)->Name(#name_ "/" #traitsName_)ARGS;
+
 
 #define BEFORE_BENCHMARK() \
    g_memAllocBytes = 0; \
@@ -197,8 +262,10 @@ public:
 template<typename TContainer>
 void BM_InsertErase(benchmark::State& state)
 {
+   using KeyType = typename TContainer::KeyType;
+
    const int64_t count = state.range(0);
-   std::vector<TContainer::KeyType> keys;
+   std::vector<KeyType> keys;
    keys.resize(count);
 
    BEFORE_BENCHMARK()
@@ -218,7 +285,7 @@ void BM_InsertErase(benchmark::State& state)
 
       for (size_t i = 0; i < count; ++i)
       {
-         TContainer::KeyType key = container.Insert(i);
+         KeyType key = container.Insert(i);
          g_memCounterEnabled = false;
          keys[i] = key;
          g_memCounterEnabled = true;
@@ -238,9 +305,9 @@ void BM_InsertErase(benchmark::State& state)
 
    AFTER_BENCHMARK()
 }
-BENCHMARK(BM_InsertErase<SlotMapContainer<int>>)ARGS;
-BENCHMARK(BM_InsertErase<StdUnorderedMapContainer<int>>)ARGS;
-BENCHMARK(BM_InsertErase<VectorWithFreelist<int>>)ARGS;
+MY_BENCHMARK(BM_InsertErase, SlotMapContainer<int>, SlotMap);
+MY_BENCHMARK(BM_InsertErase, StdUnorderedMapContainer<int>, UnorderedMap);
+MY_BENCHMARK(BM_InsertErase, VectorWithFreelist<int>, Vector);
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -248,6 +315,9 @@ template<typename TContainer>
 void BM_InsertAccess(benchmark::State& state)
 {
    BEFORE_BENCHMARK()
+
+   using KeyType = typename TContainer::KeyType;
+   using ValueType = typename TContainer::KeyType;
 
    const int64_t count = state.range(0);
 
@@ -260,8 +330,8 @@ void BM_InsertAccess(benchmark::State& state)
 
       for (size_t i = 0; i < count; ++i)
       {
-         const TContainer::ValueType value = i;
-         const TContainer::KeyType key = container.Insert(value);
+         const ValueType value = i;
+         const KeyType key = container.Insert(value);
          checksum += ++container.Get(key);
       }
 
@@ -270,9 +340,49 @@ void BM_InsertAccess(benchmark::State& state)
 
    AFTER_BENCHMARK()
 }
-BENCHMARK(BM_InsertAccess<SlotMapContainer<uint64_t>>)ARGS;
-BENCHMARK(BM_InsertAccess<StdUnorderedMapContainer<uint64_t>>)ARGS;
-BENCHMARK(BM_InsertAccess<VectorWithFreelist<uint64_t>>)ARGS;
+MY_BENCHMARK(BM_InsertAccess, SlotMapContainer<uint64_t>, SlotMap);
+MY_BENCHMARK(BM_InsertAccess, StdUnorderedMapContainer<uint64_t>, UnorderedMap);
+MY_BENCHMARK(BM_InsertAccess, VectorWithFreelist<uint64_t>, Vector);
+
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TContainer>
+void BM_Iteration(benchmark::State& state)
+{
+   BEFORE_BENCHMARK()
+
+
+   const int64_t count = state.range(0);
+
+   for (auto _ : state)
+   {
+      state.PauseTiming();
+
+      TContainer container;
+      for (size_t i = 0; i < count; ++i)
+      {
+         container.Insert(i);
+      }
+
+      state.ResumeTiming();
+
+      g_memCounterEnabled = true;
+
+      uint64_t checksum = 0;
+      for (auto iter = container.Begin(); container.FindNext(iter); container.Increment(iter))
+      {
+         checksum += container.Get(iter);
+      }
+
+      g_memCounterEnabled = false;
+   }
+
+   AFTER_BENCHMARK()
+}
+MY_BENCHMARK(BM_Iteration, SlotMapContainer<uint64_t>, SlotMap);
+MY_BENCHMARK(BM_Iteration, StdUnorderedMapContainer<uint64_t>, UnorderedMap);
+MY_BENCHMARK(BM_Iteration, VectorWithFreelist<uint64_t>, Vector);
 
 
 BENCHMARK_MAIN();
+

@@ -63,6 +63,10 @@ struct FixedSlotMapStorage
       inline const TValue* GetPtr() const { return reinterpret_cast<TValue*>(m_storage); }
    };
 
+   class Iterator
+   {
+   };
+
    FixedSlotMapStorage();
    FixedSlotMapStorage(const FixedSlotMapStorage&) = delete;
    FixedSlotMapStorage(FixedSlotMapStorage&& other);
@@ -75,6 +79,9 @@ struct FixedSlotMapStorage
    
    inline TValue* GetPtr(TKey key) { return GetPtrTpl(this, key); }
    inline const TValue* GetPtr(TKey key) const { return GetPtrTpl(this, key); }
+   
+   bool FindNextKey(TKey& key) const;
+   TKey IncrementKey(TKey key) const;
    
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
@@ -155,10 +162,30 @@ struct ChunkedSlotMapStorage
       Slot m_slots[ChunkSize];
    };
 
+   class Iterator
+   {
+   public:
+      inline Iterator(ChunkedSlotMapStorage* storage) : m_storage(storage) {}
+
+      bool operator==(const Iterator& other) const;
+      bool operator!=(const Iterator& other) const;
+
+      Iterator& operator++();
+      Iterator& operator++(int);
+
+   private:
+      ChunkedSlotMapStorage* m_storage = nullptr;
+      KeyType m_chunkIndex = 0;
+      KeyType m_slotIndex = 0;
+   };
+
    inline SizeType Size() const { return m_size; }
    inline SizeType Capacity() const { return m_chunks.size() * ChunkSize; }
 
    TValue* GetPtr(TKey key) const;
+
+   bool FindNextKey(TKey& key) const;
+   TKey IncrementKey(TKey key) const;
 
    void AllocateChunk();
    KeyType AllocateSlot(ValueType*& outPtr);
@@ -184,6 +211,7 @@ public:
    using ValueType = typename TStorage::ValueType;
    using KeyType = typename TStorage::KeyType;
    using SizeType = typename TStorage::SizeType;
+   using Iterator = typename TStorage::Iterator;
 
    static constexpr KeyType InvalidKey = TStorage::InvalidKey;
 
@@ -206,6 +234,9 @@ public:
 
    inline TValue* GetPtr(TKey key) { return m_storage.GetPtr(key); }
    inline const TValue* GetPtr(TKey key) const { return m_storage.GetPtr(key); }
+
+   inline bool FindNextKey(TKey& key) const { return m_storage.FindNextKey(key); }
+   inline TKey IncrementKey(TKey key) const { return m_storage.IncrementKey(key); }
 
 private:
    TStorage m_storage;

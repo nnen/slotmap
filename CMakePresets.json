@@ -1,0 +1,95 @@
+{
+	"version": 6,
+	"cmakeMinimumRequired": {
+		"major": 3,
+		"minor": 23,
+		"patch": 0
+	},
+	"include": [
+	],
+	"configurePresets": [{
+		"name": "clang_release",
+		"displayName": "Clang Release",
+		"description": "Release build using Ninja/Clang",
+		"generator": "Ninja",
+		"binaryDir": "${sourceDir}/build/clang_release",
+		"cacheVariables": {
+			"CMAKE_BUILD_TYPE": "Release",
+			"CMAKE_C_COMPILER": "clang",
+			"CMAKE_CXX_COMPILER": "clang++",
+            "CMAKE_EXPORT_COMPILE_COMMANDS": "1"
+		},
+		"environment": {
+		},
+		"vendor": {
+		}
+	}, {
+		"name": "clang_debug",
+		"displayName": "Clang Debug",
+		"description": "Debug build using Ninja/Clang",
+		"generator": "Ninja",
+		"binaryDir": "${sourceDir}/build/clang_debug",
+		"cacheVariables": {
+			"CMAKE_BUILD_TYPE": "Debug",
+			"CMAKE_C_COMPILER": "clang",
+			"CMAKE_CXX_COMPILER": "clang++",
+            "CMAKE_EXPORT_COMPILE_COMMANDS": "1"
+		},
+		"environment": {
+		},
+		"vendor": {
+		}
+	}, {
+		"name": "msvc_debug",
+		"displayName": "MSVC Debug",
+		"description": "Debug build using MSBuild / MSVC",
+		"generator": "Visual Studio 17 2022",
+		"binaryDir": "${sourceDir}/build/msvc_debug",
+		"cacheVariables": {
+			"CMAKE_BUILD_TYPE": "Debug"
+		},
+		"environment": {
+		},
+		"vendor": {
+		}
+	}],
+	"buildPresets": [{
+		"name": "clang_release",
+		"configurePreset": "clang_release"
+	}, {
+		"name": "clang_debug",
+		"configurePreset": "clang_debug"
+	}, {
+		"name": "msvc_debug",
+		"configurePreset": "msvc_debug"
+	}],
+	"testPresets": [{
+		"name": "default",
+		"configurePreset": "clang_debug",
+		"output": {"outputOnFailure": true},
+		"execution": {"noTestsAction": "error", "stopOnFailure": true}
+	}],
+	"packagePresets": [{
+		"name": "default",
+		"configurePreset": "clang_debug",
+		"generators": [
+			"TGZ"
+		]
+	}],
+	"workflowPresets": [{
+		"name": "default",
+		"steps": [{
+			"type": "configure",
+			"name": "clang_debug"
+		}, {
+			"type": "build",
+			"name": "clang_debug"
+		}, {
+			"type": "test",
+			"name": "default"
+		}, {
+			"type": "package",
+			"name": "default"
+		}]
+	}]
+}

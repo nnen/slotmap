@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <unordered_set>
+
 
 using namespace slotmap;
 
@@ -26,7 +28,7 @@ public:
    using MapType = typename TTraits::MapType;
    using ValueType = typename MapType::ValueType;
    using KeyType = typename MapType::KeyType;
-   using Traits = typename TTraits;
+   using Traits = TTraits;
 };
 
 using SlotMapTestTypes = ::testing::Types<
@@ -39,14 +41,14 @@ TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes);
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Placeholder)
 {
-   MapType map;
+   typename TestFixture::MapType map;
 }
 
 
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Fixed)
 {
-   MapType map;
+   typename TestFixture::MapType map;
    ASSERT_EQ(0, map.Size());
    ASSERT_EQ(map.GetPtr(0), nullptr);
    ASSERT_EQ(map.GetPtr(1), nullptr);
@@ -57,6 +59,10 @@ TYPED_TEST(SlotMapTest, Fixed)
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Emplace)
 {
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+
    MapType map;
    ASSERT_EQ(0, map.Size());
 
@@ -89,6 +95,10 @@ TYPED_TEST(SlotMapTest, Emplace)
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Erase)
 {
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+
    MapType map;
    ASSERT_EQ(0, map.Size());
 
@@ -118,6 +128,11 @@ TYPED_TEST(SlotMapTest, Erase)
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Fill)
 {
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+   using Traits = typename TestFixture::Traits;
+
    MapType map;
    std::vector<KeyType> keys;
    std::vector<KeyType> newKeys;
@@ -170,6 +185,11 @@ TYPED_TEST(SlotMapTest, Fill)
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Clear)
 {
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+   using Traits = typename TestFixture::Traits;
+
    MapType map;
    std::vector<KeyType> keys;
    keys.reserve(Traits::MaxCap);
@@ -195,4 +215,38 @@ TYPED_TEST(SlotMapTest, Clear)
       ASSERT_FALSE(map.Erase(key));
    }
 }
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, Iteration)
+{
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+   using Traits = typename TestFixture::Traits;
+
+   MapType map;
+
+   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   {
+      map.Emplace(static_cast<int>(i));
+   }
+
+   ASSERT_EQ(Traits::MaxCap, map.Size());
+
+   size_t counter = 0;
+   std::unordered_set<KeyType> keys;
+
+   for (KeyType iter = 0; map.FindNextKey(iter); iter = map.IncrementKey(iter))
+   {
+      ++counter;
+      ASSERT_TRUE(keys.count(iter) == 0);
+      keys.insert(iter);
+      ASSERT_TRUE(counter <= map.Size());
+   }
+
+   ASSERT_EQ(Traits::MaxCap, counter);
+}
+
+
 
