@@ -308,14 +308,14 @@ void BM_InsertErase(benchmark::State& state)
 
       TContainer container;
 
-      for (size_t i = 0; i < count; ++i)
+      for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
          container.Insert(i);
       }
 
       container.Clear();
 
-      for (size_t i = 0; i < count; ++i)
+      for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
          KeyType key = container.Insert(i);
          DISABLE_MEM_COUNTERS();
@@ -323,7 +323,7 @@ void BM_InsertErase(benchmark::State& state)
          ENABLE_MEM_COUNTERS();
       }
 
-      for (size_t i = 0; i < count; ++i)
+      for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
          container.Erase(keys[i]);
       }

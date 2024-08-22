@@ -301,25 +301,26 @@ TYPED_TEST(SlotMapTest, InsertAndErase)
    using ValueType = typename MapType::ValueType;
    using Traits = typename TestFixture::Traits;
 
+   auto& map = TestFixture::m_map;
    std::queue<KeyType> keyQueue;
 
    // Fill the map
-   while (m_map.Size() < Traits::MaxCap)
+   while (map.Size() < Traits::MaxCap)
    {
       KeyType key;
 
-      ASSERT_TRUE(TestFixture::Emplace(static_cast<int>(m_map.Size()), key));
+      ASSERT_TRUE(TestFixture::Emplace(static_cast<int>(map.Size()), key));
       keyQueue.push(key);
-      ASSERT_EQ(keyQueue.size(), m_map.Size());
+      ASSERT_EQ(keyQueue.size(), map.Size());
 
       key = keyQueue.front();
       ASSERT_TRUE(TestFixture::EraseValid(key));
       keyQueue.pop();
-      ASSERT_EQ(keyQueue.size(), m_map.Size());
+      ASSERT_EQ(keyQueue.size(), map.Size());
 
-      ASSERT_TRUE(TestFixture::Emplace(static_cast<int>(m_map.Size()), key));
+      ASSERT_TRUE(TestFixture::Emplace(static_cast<int>(map.Size()), key));
       keyQueue.push(key);
-      ASSERT_EQ(keyQueue.size(), m_map.Size());
+      ASSERT_EQ(keyQueue.size(), map.Size());
    }
    
    // Empty the map
@@ -328,20 +329,20 @@ TYPED_TEST(SlotMapTest, InsertAndErase)
       KeyType key = keyQueue.front();
       ASSERT_TRUE(TestFixture::EraseValid(key));
       keyQueue.pop();
-      ASSERT_EQ(keyQueue.size(), m_map.Size());
+      ASSERT_EQ(keyQueue.size(), map.Size());
 
-      ASSERT_TRUE(TestFixture::Emplace(static_cast<int>(m_map.Size()), key));
+      ASSERT_TRUE(TestFixture::Emplace(static_cast<int>(map.Size()), key));
       keyQueue.push(key);
-      ASSERT_EQ(keyQueue.size(), m_map.Size());
+      ASSERT_EQ(keyQueue.size(), map.Size());
 
       key = keyQueue.front();
       ASSERT_TRUE(TestFixture::EraseValid(key));
       keyQueue.pop();
-      ASSERT_EQ(keyQueue.size(), m_map.Size());
+      ASSERT_EQ(keyQueue.size(), map.Size());
    }
 
-   ASSERT_EQ(0, m_map.Size());
-   ASSERT_TRUE(TestFixture::CheckIteration(m_map));
+   ASSERT_EQ(0, map.Size());
+   ASSERT_TRUE(TestFixture::CheckIteration(map));
 }
 
 
