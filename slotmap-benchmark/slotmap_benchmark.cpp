@@ -281,10 +281,10 @@ public:
    g_memCounters.Clear();
 
 #define AFTER_BENCHMARK() \
-   state.counters["Alloc count"] = benchmark::Counter(g_memCounters.m_allocCount, benchmark::Counter::kAvgIterations); \
-   state.counters["Free count"] = benchmark::Counter(g_memCounters.m_freeCount, benchmark::Counter::kAvgIterations); \
-   state.counters["Alloc bytes"] = benchmark::Counter(g_memCounters.m_allocBytes, benchmark::Counter::kAvgIterations); \
-   state.counters["Max alloc size"] = g_memCounters.m_maxAllocSize;
+   state.counters["Alloc count"] = benchmark::Counter(static_cast<double>(g_memCounters.m_allocCount), benchmark::Counter::kAvgIterations); \
+   state.counters["Free count"] = benchmark::Counter(static_cast<double>(g_memCounters.m_freeCount), benchmark::Counter::kAvgIterations); \
+   state.counters["Alloc bytes"] = benchmark::Counter(static_cast<double>(g_memCounters.m_allocBytes), benchmark::Counter::kAvgIterations); \
+   state.counters["Max alloc size"] = static_cast<double>(g_memCounters.m_maxAllocSize);
 
 #define ENABLE_MEM_COUNTERS() g_memCounters.m_enabled = true;
 #define DISABLE_MEM_COUNTERS() g_memCounters.m_enabled = false;
@@ -294,6 +294,7 @@ public:
 template<typename TContainer>
 void BM_InsertErase(benchmark::State& state)
 {
+   using ValueType = typename TContainer::ValueType;
    using KeyType = typename TContainer::KeyType;
 
    const int64_t count = state.range(0);
@@ -310,14 +311,14 @@ void BM_InsertErase(benchmark::State& state)
 
       for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
-         container.Insert(i);
+         container.Insert(static_cast<ValueType>(i));
       }
 
       container.Clear();
 
       for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
-         KeyType key = container.Insert(i);
+         KeyType key = container.Insert(static_cast<ValueType>(i));
          DISABLE_MEM_COUNTERS();
          keys[i] = key;
          ENABLE_MEM_COUNTERS();
@@ -360,9 +361,9 @@ void BM_InsertAccess(benchmark::State& state)
       TContainer container;
       uint64_t checksum = 0;
 
-      for (size_t i = 0; i < count; ++i)
+      for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
-         const ValueType value = i;
+         const ValueType value = static_cast<ValueType>(i);
          const KeyType key = container.Insert(value);
          checksum += ++container.Get(key);
       }
@@ -384,7 +385,7 @@ void BM_Iteration(benchmark::State& state)
    const int64_t count = state.range(0);
 
    TContainer container;
-   for (size_t i = 0; i < count; ++i)
+   for (size_t i = 0; i < static_cast<size_t>(count); ++i)
    {
       container.Insert(i);
    }

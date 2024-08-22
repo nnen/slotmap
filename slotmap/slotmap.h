@@ -41,17 +41,14 @@ struct FixedSlotMapStorage
    static constexpr size_t StaticCapacity = TCapacity;
    static constexpr KeyType InvalidKey = static_cast<KeyType>(-1);
 
-   enum
-   {
-      GenerationBitSize = sizeof(GenerationType) * CHAR_BIT,
-      SlotIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize,
+   static constexpr KeyType GenerationBitSize = sizeof(GenerationType) * CHAR_BIT;
+   static constexpr KeyType SlotIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize;
 
-      MaxSlotCount = (1 << SlotIndexBitSize),
-      SlotIndexMask = MaxSlotCount - 1,
+   static constexpr KeyType MaxSlotCount = (static_cast<KeyType>(1) << SlotIndexBitSize);
+   static constexpr KeyType SlotIndexMask = MaxSlotCount - 1;
 
-      GenerationShift = SlotIndexBitSize,
-      GenerationMask = (1 << GenerationBitSize) - 1,
-   };
+   static constexpr KeyType GenerationShift = SlotIndexBitSize;
+   static constexpr KeyType GenerationMask = (1 << GenerationBitSize) - 1;
 
    static_assert(MaxSlotCount > TCapacity, "The key type is too small for the given capacity.");
 
@@ -123,25 +120,21 @@ struct ChunkedSlotMapStorage
 
    static constexpr KeyType InvalidKey = static_cast<KeyType>(-1);
 
-   enum
-   {
-      MaxChunkItems = std::min(1 << CHAR_BIT, static_cast<int>(MaxChunkSize / sizeof(ValueType))),
-
-      GenerationBitSize = sizeof(GenerationType) * CHAR_BIT,
-      SlotIndexBitSize = GetIndexBitSize(MaxChunkItems),
-      ChunkIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize - SlotIndexBitSize,
-
-      ChunkSize = (1 << SlotIndexBitSize),
-
-      ChunkIndexMask = (1 << ChunkIndexBitSize) - 1,
-      MaxChunkCount = ChunkIndexMask + 1,
-
-      SlotIndexShift = ChunkIndexBitSize,
-      SlotIndexMask = (1 << SlotIndexBitSize) - 1,
-
-      GenerationShift = ChunkIndexBitSize + SlotIndexBitSize,
-      GenerationMask = (1 << GenerationBitSize) - 1,
-   };
+   static constexpr size_t MaxChunkItems = std::min(1 << CHAR_BIT, static_cast<int>(MaxChunkSize / sizeof(ValueType)));
+   static constexpr int GenerationBitSize = sizeof(GenerationType) * CHAR_BIT;
+   static constexpr int SlotIndexBitSize = std::min(GetIndexBitSize(MaxChunkItems), static_cast<int>(sizeof(KeyType) * CHAR_BIT - GenerationBitSize - 1));
+   static constexpr int ChunkIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize - SlotIndexBitSize;
+   
+   static constexpr KeyType ChunkSize = (static_cast<KeyType>(1) << SlotIndexBitSize);
+   
+   static constexpr KeyType ChunkIndexMask = (static_cast<KeyType>(1) << ChunkIndexBitSize) - 1;
+   static constexpr KeyType MaxChunkCount = ChunkIndexMask + 1;
+   
+   static constexpr KeyType SlotIndexShift = ChunkIndexBitSize;
+   static constexpr KeyType SlotIndexMask = (static_cast<KeyType>(1) << SlotIndexBitSize) - 1;
+   
+   static constexpr KeyType GenerationShift = ChunkIndexBitSize + SlotIndexBitSize;
+   static constexpr KeyType GenerationMask = (static_cast<KeyType>(1) << GenerationBitSize) - 1;
 
    static_assert(SlotIndexBitSize > 0);
    static_assert(ChunkIndexBitSize > 0);
