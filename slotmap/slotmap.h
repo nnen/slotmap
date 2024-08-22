@@ -46,11 +46,14 @@ struct FixedSlotMapStorage
       GenerationBitSize = sizeof(GenerationType) * CHAR_BIT,
       SlotIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize,
 
-      SlotIndexMask = (1 << SlotIndexBitSize) - 1,
+      MaxSlotCount = (1 << SlotIndexBitSize),
+      SlotIndexMask = MaxSlotCount - 1,
 
       GenerationShift = SlotIndexBitSize,
       GenerationMask = (1 << GenerationBitSize) - 1,
    };
+
+   static_assert(MaxSlotCount > TCapacity, "The key type is too small for the given capacity.");
 
    struct Slot
    { 
@@ -140,6 +143,9 @@ struct ChunkedSlotMapStorage
       GenerationMask = (1 << GenerationBitSize) - 1,
    };
 
+   static_assert(SlotIndexBitSize > 0);
+   static_assert(ChunkIndexBitSize > 0);
+   
    struct Slot
    {
       union

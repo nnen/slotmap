@@ -8,24 +8,58 @@
 #include <unordered_map>
 
 
-bool g_memCounterEnabled = false;
-size_t g_memAllocCount = 0;
-size_t g_memAllocBytes = 0;
-size_t g_maxAllocSize = 0;
+struct  
+{
+   void Clear()
+   {
+      m_allocCount = 0;
+      m_freeCount = 0;
+      m_allocBytes = 0;
+      m_maxAllocSize = 0;
+   }
+   
+   bool m_enabled = false;
+   size_t m_allocCount = 0;
+   size_t m_freeCount = 0;
+   size_t m_allocBytes = 0;
+   size_t m_maxAllocSize = 0;
+} g_memCounters;
+
+//bool g_memCounterEnabled = false;
+//size_t g_memAllocCount = 0;
+//size_t g_memAllocBytes = 0;
+//size_t g_maxAllocSize = 0;
 
 
 void* operator new(size_t size)
 {
-   if (g_memCounterEnabled)
+   if (g_memCounters.m_enabled)
    {
-      ++g_memAllocCount;
-      g_memAllocBytes += size;
-      if (size > g_maxAllocSize)
+      ++g_memCounters.m_allocCount;
+      g_memCounters.m_allocBytes += size;
+      if (size > g_memCounters.m_maxAllocSize)
       {
-         g_maxAllocSize = size;
+         g_memCounters.m_maxAllocSize = size;
       }
    }
+
+   //if (g_memCounterEnabled)
+   //{
+   //   ++g_memAllocCount;
+   //   g_memAllocBytes += size;
+   //   if (size > g_maxAllocSize)
+   //   {
+   //      g_maxAllocSize = size;
+   //   }
+   //}
    return malloc(size);
+}
+
+void operator delete(void* ptr) noexcept
+{
+   ++g_memCounters.m_freeCount;
+
+   free(ptr);
 }
 
 
@@ -224,19 +258,15 @@ public:
 class CustomMemoryManager : public benchmark::MemoryManager
 {
 public:
-   //size_t m_allocCount = 0;
-   //size_t m_allocBytes = 0;
-
    void Start() BENCHMARK_OVERRIDE
    {
-      g_memAllocCount = 0;
-      g_memAllocBytes = 0;
+      g_memCounters.Clear();
    }
 
    void Stop(Result& result) BENCHMARK_OVERRIDE
    {
-      result.num_allocs = g_memAllocCount;
-      result.total_allocated_bytes = g_memAllocBytes;
+      result.num_allocs = g_memCounters.m_allocCount;
+      result.total_allocated_bytes = g_memCounters.m_allocBytes;
    }
 };
 
@@ -248,14 +278,16 @@ public:
 
 
 #define BEFORE_BENCHMARK() \
-   g_memAllocBytes = 0; \
-   g_memAllocCount = 0; \
-   g_maxAllocSize = 0;
+   g_memCounters.Clear();
 
 #define AFTER_BENCHMARK() \
-   state.counters["Alloc count"] = benchmark::Counter(g_memAllocCount, benchmark::Counter::kAvgIterations); \
-   state.counters["Alloc bytes"] = benchmark::Counter(g_memAllocBytes, benchmark::Counter::kAvgIterations); \
-   state.counters["Max alloc size"] = g_maxAllocSize;
+   state.counters["Alloc count"] = benchmark::Counter(g_memCounters.m_allocCount, benchmark::Counter::kAvgIterations); \
+   state.counters["Free count"] = benchmark::Counter(g_memCounters.m_freeCount, benchmark::Counter::kAvgIterations); \
+   state.counters["Alloc bytes"] = benchmark::Counter(g_memCounters.m_allocBytes, benchmark::Counter::kAvgIterations); \
+   state.counters["Max alloc size"] = g_memCounters.m_maxAllocSize;
+
+#define ENABLE_MEM_COUNTERS() g_memCounters.m_enabled = true;
+#define DISABLE_MEM_COUNTERS() g_memCounters.m_enabled = false;
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -272,7 +304,7 @@ void BM_InsertErase(benchmark::State& state)
 
    for (auto _ : state)
    {
-      g_memCounterEnabled = true;
+      ENABLE_MEM_COUNTERS();
 
       TContainer container;
 
@@ -286,9 +318,9 @@ void BM_InsertErase(benchmark::State& state)
       for (size_t i = 0; i < count; ++i)
       {
          KeyType key = container.Insert(i);
-         g_memCounterEnabled = false;
+         DISABLE_MEM_COUNTERS();
          keys[i] = key;
-         g_memCounterEnabled = true;
+         ENABLE_MEM_COUNTERS();
       }
 
       for (size_t i = 0; i < count; ++i)
@@ -299,8 +331,8 @@ void BM_InsertErase(benchmark::State& state)
       state.PauseTiming();
       keys.clear();
       state.ResumeTiming();
-
-      g_memCounterEnabled = false;
+      
+      DISABLE_MEM_COUNTERS();
    }
 
    AFTER_BENCHMARK()
@@ -323,7 +355,7 @@ void BM_InsertAccess(benchmark::State& state)
 
    for (auto _ : state)
    {
-      g_memCounterEnabled = true;
+      ENABLE_MEM_COUNTERS();
 
       TContainer container;
       uint64_t checksum = 0;
@@ -335,7 +367,7 @@ void BM_InsertAccess(benchmark::State& state)
          checksum += ++container.Get(key);
       }
 
-      g_memCounterEnabled = false;
+      DISABLE_MEM_COUNTERS();
    }
 
    AFTER_BENCHMARK()
@@ -349,32 +381,27 @@ MY_BENCHMARK(BM_InsertAccess, VectorWithFreelist<uint64_t>, Vector);
 template<typename TContainer>
 void BM_Iteration(benchmark::State& state)
 {
-   BEFORE_BENCHMARK()
-
-
    const int64_t count = state.range(0);
+
+   TContainer container;
+   for (size_t i = 0; i < count; ++i)
+   {
+      container.Insert(i);
+   }
+
+   BEFORE_BENCHMARK()
 
    for (auto _ : state)
    {
-      state.PauseTiming();
+      ENABLE_MEM_COUNTERS();
 
-      TContainer container;
-      for (size_t i = 0; i < count; ++i)
-      {
-         container.Insert(i);
-      }
-
-      state.ResumeTiming();
-
-      g_memCounterEnabled = true;
-
-      uint64_t checksum = 0;
+      volatile uint64_t checksum = 0;
       for (auto iter = container.Begin(); container.FindNext(iter); container.Increment(iter))
       {
          checksum += container.Get(iter);
       }
 
-      g_memCounterEnabled = false;
+      DISABLE_MEM_COUNTERS();
    }
 
    AFTER_BENCHMARK()

@@ -21,7 +21,7 @@ FixedSlotMapStorage<TValue, TKey, TCapacity>::FixedSlotMapStorage()
    {
       m_slots[i].m_nextFreeSlot = i + 1;
    }
-   m_slots[TCapacity - 1].m_nextFreeSlot = InvalidKey;
+   m_slots[TCapacity - 1].m_nextFreeSlot = -1;
 }
 
 
@@ -91,8 +91,11 @@ template<
    size_t TCapacity>
 TKey FixedSlotMapStorage<TValue, TKey, TCapacity>::AllocateSlot(TValue*& outPtr)
 {
-   assert(m_firstFreeSlot >= 0);
-
+   if (m_firstFreeSlot < 0)
+   {
+      return InvalidKey;
+   }
+   
    const SizeType slotIndex = m_firstFreeSlot;
    assert(!m_liveBits[slotIndex]);
    m_firstFreeSlot = m_slots[slotIndex].m_nextFreeSlot;
