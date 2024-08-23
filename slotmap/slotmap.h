@@ -61,7 +61,7 @@ struct FixedSlotMapStorage
       };
 
       inline TValue* GetPtr() { return reinterpret_cast<TValue*>(m_storage); }
-      inline const TValue* GetPtr() const { return reinterpret_cast<TValue*>(m_storage); }
+      inline const TValue* GetPtr() const { return reinterpret_cast<const TValue*>(m_storage); }
    };
 
    class Iterator
@@ -71,6 +71,8 @@ struct FixedSlotMapStorage
    FixedSlotMapStorage();
    FixedSlotMapStorage(const FixedSlotMapStorage&) = delete;
    FixedSlotMapStorage(FixedSlotMapStorage&& other);
+
+   ~FixedSlotMapStorage();
 
    inline SizeType Size() const { return m_size; }
    inline SizeType Capacity() const { return Capacity; }
@@ -179,6 +181,12 @@ struct ChunkedSlotMapStorage
       KeyType m_slotIndex = 0;
    };
 
+   ChunkedSlotMapStorage() = default;
+   ChunkedSlotMapStorage(const ChunkedSlotMapStorage&) = delete;
+   ChunkedSlotMapStorage(ChunkedSlotMapStorage&& other);
+
+   inline ~ChunkedSlotMapStorage() { Clear(); }
+
    inline SizeType Size() const { return m_size; }
    inline SizeType Capacity() const { return m_chunks.size() * ChunkSize; }
 
@@ -217,7 +225,7 @@ public:
 
    SlotMap() = default;
    SlotMap(const SlotMap& other) = delete;
-   SlotMap(SlotMap&& other);
+   inline SlotMap(SlotMap&& other) : m_storage(std::move(other.m_storage)) {}
 
    SlotMap& operator=(const SlotMap& other) = delete;
    SlotMap& operator=(SlotMap&& other);
@@ -241,24 +249,6 @@ public:
 private:
    TStorage m_storage;
 };
-
-
-template<typename TValue, typename TKey, typename TStorage>
-template<typename... TArgs>
-TKey SlotMap<TValue, TKey, TStorage>::Emplace(TArgs&&... args)
-{
-   TValue* ptr = nullptr;
-   const TKey key = m_storage.AllocateSlot(ptr);
-
-   if (!ptr)
-   {
-      return InvalidKey;
-   }
-
-   new (ptr) TValue(std::forward<TArgs>(args)...);
-
-   return key;
-}
 
 
 template<typename TValue, size_t Capacity, typename TKey = uint32_t>
