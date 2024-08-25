@@ -369,8 +369,24 @@ TYPED_TEST(SlotMapTest, MoveCtor)
    }
    
    this->m_items.clear();
+   ASSERT_TRUE(TestFixture::CheckValues(this->m_map1, this->m_items));
    
    ASSERT_TRUE(TestValueType::CheckLiveInstances(0));
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, MoveAssignment)
+{
+   ASSERT_TRUE(TestFixture::SetUpTestData(this->m_map1, this->m_items, 16));
+   ASSERT_TRUE(TestFixture::CheckValues(this->m_map1, this->m_items));
+   ASSERT_TRUE(TestValueType::CheckLiveInstances(32));
+   
+   this->m_map2 = std::move(this->m_map1);
+   
+   ASSERT_TRUE(TestValueType::CheckLiveInstances(32));
+   ASSERT_TRUE(TestFixture::CheckValues(this->m_map2, this->m_items));
+   ASSERT_TRUE(TestFixture::CheckValues(this->m_map1, {}));
 }
 
 
@@ -590,6 +606,24 @@ TYPED_TEST(SlotMapTest, InsertAndErase)
 
    ASSERT_EQ(0, map.Size());
    ASSERT_TRUE(TestFixture::CheckIteration(map));
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, Swap)
+{
+   using Traits = typename TestFixture::Traits;
+
+   const size_t count = Traits::MaxCap >> 1;
+
+   ASSERT_TRUE(TestFixture::SetUpTestData(this->m_map1, this->m_items, count));
+   ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 2));
+
+   this->m_map2.Swap(this->m_map1);
+
+   ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 2));
+   ASSERT_TRUE(TestFixture::CheckValues(this->m_map2, this->m_items));
+   ASSERT_TRUE(TestFixture::CheckValues(this->m_map1, {}));
 }
 
 

@@ -74,6 +74,9 @@ struct FixedSlotMapStorage
 
    ~FixedSlotMapStorage();
 
+   FixedSlotMapStorage& operator=(const FixedSlotMapStorage&) = delete;
+   FixedSlotMapStorage& operator=(FixedSlotMapStorage&&);
+
    inline SizeType Size() const { return m_size; }
    inline SizeType Capacity() const { return Capacity; }
 
@@ -89,6 +92,7 @@ struct FixedSlotMapStorage
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
 
+   void Swap(FixedSlotMapStorage& other);
    void Clear();
    
    SizeType m_size = 0;
@@ -187,6 +191,9 @@ struct ChunkedSlotMapStorage
 
    inline ~ChunkedSlotMapStorage() { Clear(); }
 
+   ChunkedSlotMapStorage& operator=(const ChunkedSlotMapStorage&) = delete;
+   ChunkedSlotMapStorage& operator=(ChunkedSlotMapStorage&& other);
+
    inline SizeType Size() const { return m_size; }
    inline SizeType Capacity() const { return m_chunks.size() * ChunkSize; }
 
@@ -199,7 +206,8 @@ struct ChunkedSlotMapStorage
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
    void FreeSlotByIndex(IndexType chunkIndex, IndexType slotIndex);
- 
+   
+   void Swap(ChunkedSlotMapStorage& other);
    void Clear();
 
    using ChunkAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk>;
@@ -226,10 +234,10 @@ public:
    SlotMap() = default;
    SlotMap(const SlotMap& other) = delete;
    inline SlotMap(SlotMap&& other) : m_storage(std::move(other.m_storage)) {}
-
+   
    SlotMap& operator=(const SlotMap& other) = delete;
-   SlotMap& operator=(SlotMap&& other);
-
+   inline SlotMap& operator=(SlotMap&& other) { m_storage = std::move(other.m_storage); return *this; }
+   
    inline SizeType Size() const { return m_storage.Size(); }
    inline SizeType Capacity() const { return m_storage.Capacity(); }
    bool Reserve(SizeType capacity);
@@ -238,6 +246,7 @@ public:
    TKey Emplace(TArgs&&... args);
 
    inline bool Erase(TKey key) { return m_storage.FreeSlot(key); }
+   inline void Swap(SlotMap& other) { m_storage.Swap(other.m_storage); }
    inline void Clear() { m_storage.Clear(); }
 
    inline TValue* GetPtr(TKey key) { return m_storage.GetPtr(key); }
