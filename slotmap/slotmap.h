@@ -69,7 +69,7 @@ struct FixedSlotMapStorage
    };
 
    FixedSlotMapStorage();
-   FixedSlotMapStorage(const FixedSlotMapStorage&) = delete;
+   FixedSlotMapStorage(const FixedSlotMapStorage&);
    FixedSlotMapStorage(FixedSlotMapStorage&& other);
 
    ~FixedSlotMapStorage();
@@ -154,11 +154,14 @@ struct ChunkedSlotMapStorage
       };
 
       inline TValue* GetPtr() { return reinterpret_cast<TValue*>(m_storage); }
-      inline const TValue* GetPtr() const { return reinterpret_cast<TValue*>(m_storage); }
+      inline const TValue* GetPtr() const { return reinterpret_cast<const TValue*>(m_storage); }
    };
 
    struct Chunk
    {
+      Chunk() = default;
+      Chunk(const Chunk& other);
+
       IndexType m_nextFreeChunk = -1;
       IndexType m_firstFreeSlot = -1;
       IndexType m_lastFreeSlot = -1;
@@ -186,7 +189,7 @@ struct ChunkedSlotMapStorage
    };
 
    ChunkedSlotMapStorage() = default;
-   ChunkedSlotMapStorage(const ChunkedSlotMapStorage&) = delete;
+   ChunkedSlotMapStorage(const ChunkedSlotMapStorage&);
    ChunkedSlotMapStorage(ChunkedSlotMapStorage&& other);
 
    inline ~ChunkedSlotMapStorage() { Clear(); }
@@ -219,6 +222,52 @@ struct ChunkedSlotMapStorage
 };
 
 
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator>
+ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::Chunk::Chunk(const Chunk& other)
+   : m_nextFreeChunk(other.m_nextFreeChunk)
+   , m_firstFreeSlot(other.m_firstFreeSlot)
+   , m_lastFreeSlot(other.m_lastFreeSlot)
+   , m_liveBits(other.m_liveBits)
+{
+   for (size_t i = 0; i < ChunkSize; ++i)
+   {
+      m_generations[i] = other.m_generations[i];
+      if (other.m_liveBits[i])
+      {
+         TValue* const ptr = m_slots[i].GetPtr();
+         const TValue* const otherPtr = other.m_slots[i].GetPtr();
+         new (ptr) TValue(*otherPtr);
+      }
+      else
+      {
+         m_slots[i].m_nextFreeSlot = other.m_slots[i].m_nextFreeSlot;
+      }
+   }
+}
+
+
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator>
+ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::ChunkedSlotMapStorage(const ChunkedSlotMapStorage& other)
+   : m_size(other.m_size)
+   , m_firstFreeChunk(other.m_firstFreeChunk)
+{
+   m_chunks.resize(other.m_chunks.size());
+   
+   for (size_t i = 0; i < other.m_chunks.size(); ++i)
+   {
+      m_chunks[i] = new Chunk(*other.m_chunks[i]);
+   }
+}
+
+
 //////////////////////////////////////////////////////////////////////////
 template<typename TValue, typename TKey = uint32_t, typename TStorage = ChunkedSlotMapStorage<TValue, TKey>>
 class SlotMap
@@ -232,10 +281,10 @@ public:
    static constexpr KeyType InvalidKey = TStorage::InvalidKey;
 
    SlotMap() = default;
-   SlotMap(const SlotMap& other) = delete;
+   inline SlotMap(const SlotMap& other) : m_storage(other.m_storage) {}
    inline SlotMap(SlotMap&& other) : m_storage(std::move(other.m_storage)) {}
    
-   SlotMap& operator=(const SlotMap& other) = delete;
+   inline SlotMap& operator=(const SlotMap& other) { m_storage = other.m_storage; return *this; }
    inline SlotMap& operator=(SlotMap&& other) { m_storage = std::move(other.m_storage); return *this; }
    
    inline SizeType Size() const { return m_storage.Size(); }

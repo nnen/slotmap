@@ -342,6 +342,27 @@ TYPED_TEST(SlotMapTest, Create)
 
 
 //////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, CopyCtor)
+{
+   using Traits = typename TestFixture::Traits;
+
+   const size_t count = Traits::MaxCap >> 1;
+
+   ASSERT_TRUE(TestFixture::SetUpTestData(this->m_map1, this->m_items, count));
+   ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 2));
+
+   {
+      typename TestFixture::MapType map(this->m_map1);
+      ASSERT_TRUE(TestFixture::CheckValues(map, this->m_items));
+      ASSERT_TRUE(TestFixture::CheckValues(this->m_map1, this->m_items));
+      ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 3));
+   }
+
+   ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 2));
+}
+
+
+//////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, MoveCtor_Empty)
 {
    {

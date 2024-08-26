@@ -30,6 +30,33 @@ template<
    typename TValue,
    typename TKey,
    size_t TCapacity>
+FixedSlotMapStorage<TValue, TKey, TCapacity>::FixedSlotMapStorage(const FixedSlotMapStorage& other)
+   : m_size(other.m_size)
+   , m_firstFreeSlot(other.m_firstFreeSlot)
+   , m_liveBits(other.m_liveBits)
+{
+   for (size_t i = 0; i < StaticCapacity; ++i)
+   {
+      m_generations[i] = other.m_generations[i];
+      if (other.m_liveBits[i])
+      {
+         TValue* ptr = m_slots[i].GetPtr();
+         const TValue* otherPtr = other.m_slots[i].GetPtr();
+         new (ptr) TValue(*otherPtr);
+      }
+      else
+      {
+         m_slots[i].m_nextFreeSlot = other.m_slots[i].m_nextFreeSlot;
+      }
+   }
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t TCapacity>
 FixedSlotMapStorage<TValue, TKey, TCapacity>::FixedSlotMapStorage(FixedSlotMapStorage&& other)
    : m_size(other.m_size)
    , m_firstFreeSlot(other.m_firstFreeSlot)
