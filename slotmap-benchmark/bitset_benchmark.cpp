@@ -1,3 +1,5 @@
+// Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
+
 #include <benchmark/benchmark.h>
 
 #include <bitset>

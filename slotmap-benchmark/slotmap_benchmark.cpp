@@ -1,3 +1,6 @@
+// Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
+
+
 #define MEMORY_PROFILER
 
 #include <benchmark/benchmark.h>

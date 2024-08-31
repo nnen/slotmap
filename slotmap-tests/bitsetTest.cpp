@@ -1,3 +1,5 @@
+// Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
+
 #include <slotmap/bitset.h>
 
 #include <gtest/gtest.h>
