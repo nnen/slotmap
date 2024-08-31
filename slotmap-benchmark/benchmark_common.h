@@ -3,6 +3,7 @@
 
 #pragma once
 #include <cstdint>
+#include <cstdlib>
 
 
 inline float randf()

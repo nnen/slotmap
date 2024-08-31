@@ -1,11 +1,12 @@
 // Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
 
 #pragma once
-#include <cstdint>
-#include <climits>
-#include <type_traits>
 #include <bitset>
 #include <cassert>
+#include <climits>
+#include <cstdint>
+#include <cstring>
+#include <type_traits>
 
 #ifdef _MSC_VER
 #include <intrin.h>
