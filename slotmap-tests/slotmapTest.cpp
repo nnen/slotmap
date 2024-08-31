@@ -1,3 +1,5 @@
+#include "testsCommon.h"
+
 #include <slotmap/slotmap.h>
 
 #include <gtest/gtest.h>
@@ -141,6 +143,21 @@ public:
    }
 
    ::testing::AssertionResult SetUpTestData(MapType& map, Pairs& values, size_t count)
+   {
+      for (size_t i = 0; i < count; ++i)
+      {
+         ValueType value = static_cast<ValueType>(m_valueCounter++);
+         const KeyType key = map.Emplace(value);
+         if (values.count(key) != 0)
+         {
+            return ::testing::AssertionFailure() << "Key " << key << " already exists";
+         }
+         values[key] = value;
+      }
+      return ::testing::AssertionSuccess();
+   }
+
+   ::testing::AssertionResult SetUpTestData(MapType& map, Pairs& values, size_t count, float fillRate)
    {
       for (size_t i = 0; i < count; ++i)
       {

@@ -40,6 +40,23 @@
 		"vendor": {
 		}
 	}, {
+		"name": "msvc_release",
+		"displayName": "MSVC Release",
+		"description": "Release build using MSBuild / MSVC",
+		"generator": "Visual Studio 17 2022",
+		"binaryDir": "${sourceDir}/build/msvc_release",
+		"architecture": {
+			"value": "x64",
+			"strategy": "set"
+		},
+		"cacheVariables": {
+			"CMAKE_BUILD_TYPE": "Release"
+		},
+		"environment": {
+		},
+		"vendor": {
+		}
+	}, {
 		"name": "msvc_debug",
 		"displayName": "MSVC Debug",
 		"description": "Debug build using MSBuild / MSVC",
@@ -59,6 +76,10 @@
 	}, {
 		"name": "clang_debug",
 		"configurePreset": "clang_debug"
+	}, {
+		"name": "msvc_release",
+		"configurePreset": "msvc_release",
+		"configuration": "Release"
 	}, {
 		"name": "msvc_debug",
 		"configurePreset": "msvc_debug"

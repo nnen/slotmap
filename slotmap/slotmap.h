@@ -7,6 +7,8 @@
 #include <memory>
 #include <cassert>
 
+#include "bitset.h"
+
 
 namespace slotmap {
 
@@ -25,7 +27,8 @@ constexpr int GetIndexBitSize(int arraySize)
 template<
    typename TValue,
    typename TKey,
-   size_t TCapacity = 1024>
+   size_t TCapacity = 1024,
+   typename TBitsetTraits = FixedBitSetTraits<>>
 struct FixedSlotMapStorage
 {
    using ValueType = TValue;
@@ -34,6 +37,8 @@ struct FixedSlotMapStorage
 
    using SizeType = size_t;
    using IndexType = ptrdiff_t;
+
+   using BitsetType = typename TBitsetTraits::template BitsetType<TCapacity>;
 
    static_assert(std::is_unsigned_v<KeyType>);
    static_assert(sizeof(GenerationType) < sizeof(KeyType));
@@ -88,7 +93,10 @@ struct FixedSlotMapStorage
    
    bool FindNextKey(TKey& key) const;
    TKey IncrementKey(TKey key) const;
-   
+
+   template<typename TFunc>
+   void ForEachSlot(TFunc func) const;
+
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
 
@@ -97,10 +105,14 @@ struct FixedSlotMapStorage
    
    SizeType m_size = 0;
    IndexType m_firstFreeSlot = -1;
-   std::bitset<TCapacity> m_liveBits;
+   BitsetType m_liveBits;
    GenerationType m_generations[TCapacity];
    Slot m_slots[TCapacity];
 };
+
+
+//////////////////////////////////////////////////////////////////////////
+constexpr size_t DefaultMaxChunkSize = 2048;
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -109,9 +121,10 @@ struct FixedSlotMapStorage
  */
 template<
    typename TValue,
-   typename TKey,
-   size_t MaxChunkSize = 2048,
-   typename TAllocator = std::allocator<TValue>>
+   typename TKey = uint32_t,
+   size_t MaxChunkSize = DefaultMaxChunkSize,
+   typename TAllocator = std::allocator<TValue>,
+   typename TBitsetTraits = FixedBitSetTraits<>>
 struct ChunkedSlotMapStorage
 {
    using ValueType = TValue;
@@ -142,6 +155,8 @@ struct ChunkedSlotMapStorage
    static constexpr KeyType GenerationShift = ChunkIndexBitSize + SlotIndexBitSize;
    static constexpr KeyType GenerationMask = (static_cast<KeyType>(1) << GenerationBitSize) - 1;
 
+   using BitsetType = typename TBitsetTraits::template BitsetType<ChunkSize>;
+
    static_assert(SlotIndexBitSize > 0);
    static_assert(ChunkIndexBitSize > 0);
    
@@ -166,7 +181,7 @@ struct ChunkedSlotMapStorage
       IndexType m_firstFreeSlot = -1;
       IndexType m_lastFreeSlot = -1;
 
-      std::bitset<ChunkSize> m_liveBits;
+      BitsetType m_liveBits;
       GenerationType m_generations[ChunkSize];
       Slot m_slots[ChunkSize];
    };
@@ -205,6 +220,9 @@ struct ChunkedSlotMapStorage
    bool FindNextKey(TKey& key) const;
    TKey IncrementKey(TKey key) const;
 
+   template<typename TFunc>
+   void ForEachSlot(TFunc func) const;
+
    void AllocateChunk();
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
@@ -226,8 +244,9 @@ template<
    typename TValue,
    typename TKey,
    size_t MaxChunkSize,
-   typename TAllocator>
-ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::Chunk::Chunk(const Chunk& other)
+   typename TAllocator,
+   typename TBitsetTraits>
+ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::Chunk::Chunk(const Chunk& other)
    : m_nextFreeChunk(other.m_nextFreeChunk)
    , m_firstFreeSlot(other.m_firstFreeSlot)
    , m_lastFreeSlot(other.m_lastFreeSlot)
@@ -254,8 +273,9 @@ template<
    typename TValue,
    typename TKey,
    size_t MaxChunkSize,
-   typename TAllocator>
-ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator>::ChunkedSlotMapStorage(const ChunkedSlotMapStorage& other)
+   typename TAllocator,
+   typename TBitsetTraits>
+ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ChunkedSlotMapStorage(const ChunkedSlotMapStorage& other)
    : m_size(other.m_size)
    , m_firstFreeChunk(other.m_firstFreeChunk)
 {
@@ -303,6 +323,9 @@ public:
 
    inline bool FindNextKey(TKey& key) const { return m_storage.FindNextKey(key); }
    inline TKey IncrementKey(TKey key) const { return m_storage.IncrementKey(key); }
+
+   template<typename TFunc>
+   inline void ForEachSlot(TFunc func) const { m_storage.ForEachSlot(func); }
 
 private:
    TStorage m_storage;
