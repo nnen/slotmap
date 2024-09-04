@@ -53,7 +53,7 @@ template<
    typename TKey,
    size_t TCapacity = 1024,
    typename TBitsetTraits = FixedBitSetTraits<>>
-struct FixedSlotMapStorage
+   struct FixedSlotMapStorage
 {
    using ValueType = TValue;
    using KeyType = TKey;
@@ -82,7 +82,7 @@ struct FixedSlotMapStorage
    static_assert(MaxSlotCount > TCapacity, "The key type is too small for the given capacity.");
 
    struct Slot
-   { 
+   {
       union
       {
          alignas(TValue) uint8_t m_storage[sizeof(TValue)];
@@ -107,14 +107,15 @@ struct FixedSlotMapStorage
    FixedSlotMapStorage& operator=(FixedSlotMapStorage&&);
 
    inline SizeType Size() const { return m_size; }
-   inline SizeType Capacity() const { return Capacity; }
+   inline constexpr SizeType Capacity() const { return StaticCapacity; }
+   inline static constexpr SizeType MaxCapacity() { return StaticCapacity; }
 
    template<typename TSelf>
    static inline auto GetPtrTpl(TSelf self, TKey key);
-   
+
    inline TValue* GetPtr(TKey key) { return GetPtrTpl(this, key); }
    inline const TValue* GetPtr(TKey key) const { return GetPtrTpl(this, key); }
-   
+
    bool FindNextKey(TKey& key) const;
    TKey IncrementKey(TKey key) const;
 
@@ -126,7 +127,7 @@ struct FixedSlotMapStorage
 
    void Swap(FixedSlotMapStorage& other);
    void Clear();
-   
+
    SizeType m_size = 0;
    IndexType m_firstFreeSlot = -1;
    BitsetType m_liveBits;
@@ -136,7 +137,87 @@ struct FixedSlotMapStorage
 
 
 //////////////////////////////////////////////////////////////////////////
-constexpr size_t DefaultMaxChunkSize = 2048;
+constexpr size_t DefaultMaxChunkSize = 4096;
+constexpr size_t MinChunkSlots = 4;
+
+
+//////////////////////////////////////////////////////////////////////////
+template<size_t TSlotCount, typename TValue, typename TIndexType, typename TGenerationType, typename TBitsetTraits>
+struct ChunkTpl
+{
+   struct Slot
+   {
+      union
+      {
+         alignas(TValue) uint8_t m_storage[sizeof(TValue)];
+         TIndexType m_nextFreeSlot;
+      };
+   
+      inline TValue* GetPtr() { return reinterpret_cast<TValue*>(m_storage); }
+      inline const TValue* GetPtr() const { return reinterpret_cast<const TValue*>(m_storage); }
+   };
+
+   using BitsetType = typename TBitsetTraits::template BitsetType<TSlotCount>;
+
+   ChunkTpl() = default;
+   ChunkTpl(const ChunkTpl& other);
+
+   TIndexType m_nextFreeChunk = -1;
+   TIndexType m_firstFreeSlot = -1;
+   TIndexType m_lastFreeSlot = -1;
+
+   BitsetType m_liveBits;
+   TGenerationType m_generations[TSlotCount];
+   Slot m_slots[TSlotCount];
+};
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   size_t MinSlots, 
+   size_t MaxSlots, 
+   size_t MaxChunkSize, 
+   typename TValueType, 
+   typename TIndexType, 
+   typename TGenerationType,
+   typename TBitsetTraits>
+constexpr size_t GetChunkMaxSlots()
+{
+   if constexpr (MaxSlots <= MinSlots)
+   {
+      return MinSlots;
+   }
+   else
+   {
+      if constexpr (sizeof(ChunkTpl<MinSlots, TValueType, TIndexType, TGenerationType, TBitsetTraits>) >= MaxChunkSize)
+      {
+         return MinSlots;
+      }
+      else if constexpr (sizeof(ChunkTpl<MaxSlots, TValueType, TIndexType, TGenerationType, TBitsetTraits>) <= MaxChunkSize)
+      {
+         return MaxSlots;
+      }
+      else
+      {
+         constexpr size_t pivot = (MinSlots + MaxSlots) >> 1;
+
+         if constexpr (pivot == MinSlots)
+         {
+            return MinSlots;
+         }
+         else if constexpr (sizeof(ChunkTpl<pivot, TValueType, TIndexType, TGenerationType, TBitsetTraits>) > MaxChunkSize)
+         {
+            return GetChunkMaxSlots<MinSlots, pivot - 1, MaxChunkSize, TValueType, TIndexType, TGenerationType, TBitsetTraits>();
+         }
+         else
+         {
+            return GetChunkMaxSlots<pivot, MaxSlots, MaxChunkSize, TValueType, TIndexType, TGenerationType, TBitsetTraits>();
+         }
+      }
+   }
+
+   return MinSlots;
+}
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -158,20 +239,22 @@ struct ChunkedSlotMapStorage
    using SizeType = size_t;
    using IndexType = ptrdiff_t;
 
-   static_assert(std::is_unsigned_v<KeyType>);
-   static_assert(sizeof(KeyType) > sizeof(GenerationType));
+   
+   static_assert(std::is_unsigned_v<KeyType>, "Slotmap key type must be an unsigned integer type.");
+   static_assert(sizeof(KeyType) > sizeof(GenerationType), "The size of slotmap key type must be greater than the size of generation type.");
 
    static constexpr KeyType InvalidKey = static_cast<KeyType>(-1);
-
-   static constexpr size_t MaxChunkItems = std::min(1 << CHAR_BIT, static_cast<int>(MaxChunkSize / sizeof(ValueType)));
+   
+   static constexpr size_t MaxChunkSlots = GetChunkMaxSlots<MinChunkSlots, MaxChunkSize, MaxChunkSize, ValueType, IndexType, GenerationType, TBitsetTraits>();
    static constexpr int GenerationBitSize = sizeof(GenerationType) * CHAR_BIT;
-   static constexpr int SlotIndexBitSize = std::min(GetIndexBitSize(MaxChunkItems), static_cast<int>(sizeof(KeyType) * CHAR_BIT - GenerationBitSize - 1));
+   static constexpr int SlotIndexBitSize = std::min(GetIndexBitSize(MaxChunkSlots), static_cast<int>(sizeof(KeyType) * CHAR_BIT - GenerationBitSize - 1));
    static constexpr int ChunkIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize - SlotIndexBitSize;
    
-   static constexpr KeyType ChunkSize = (static_cast<KeyType>(1) << SlotIndexBitSize);
+   static constexpr KeyType ChunkSlots = std::min<KeyType>(static_cast<KeyType>(MaxChunkSlots), static_cast<KeyType>(1) << SlotIndexBitSize);
+   static_assert(ChunkSlots > 0, "Chunk must contain more than 0 slots.");
    
    static constexpr KeyType ChunkIndexMask = (static_cast<KeyType>(1) << ChunkIndexBitSize) - 1;
-   static constexpr KeyType MaxChunkCount = ChunkIndexMask + 1;
+   static constexpr KeyType MaxChunkCount = ChunkIndexMask;
    
    static constexpr KeyType SlotIndexShift = ChunkIndexBitSize;
    static constexpr KeyType SlotIndexMask = (static_cast<KeyType>(1) << SlotIndexBitSize) - 1;
@@ -179,36 +262,14 @@ struct ChunkedSlotMapStorage
    static constexpr KeyType GenerationShift = ChunkIndexBitSize + SlotIndexBitSize;
    static constexpr KeyType GenerationMask = (static_cast<KeyType>(1) << GenerationBitSize) - 1;
 
-   using BitsetType = typename TBitsetTraits::template BitsetType<ChunkSize>;
+   using BitsetType = typename TBitsetTraits::template BitsetType<ChunkSlots>;
 
    static_assert(SlotIndexBitSize > 0);
    static_assert(ChunkIndexBitSize > 0);
    
-   struct Slot
-   {
-      union
-      {
-         alignas(TValue) uint8_t m_storage[sizeof(TValue)];
-         IndexType m_nextFreeSlot;
-      };
-
-      inline TValue* GetPtr() { return reinterpret_cast<TValue*>(m_storage); }
-      inline const TValue* GetPtr() const { return reinterpret_cast<const TValue*>(m_storage); }
-   };
-
-   struct Chunk
-   {
-      Chunk() = default;
-      Chunk(const Chunk& other);
-
-      IndexType m_nextFreeChunk = -1;
-      IndexType m_firstFreeSlot = -1;
-      IndexType m_lastFreeSlot = -1;
-
-      BitsetType m_liveBits;
-      GenerationType m_generations[ChunkSize];
-      Slot m_slots[ChunkSize];
-   };
+   using Chunk = ChunkTpl<ChunkSlots, ValueType, IndexType, GenerationType, TBitsetTraits>;
+   using Slot = typename Chunk::Slot;
+   static_assert(sizeof(Chunk) <= MaxChunkSize, "Chunk size is too large.");
 
    class Iterator
    {
@@ -237,7 +298,8 @@ struct ChunkedSlotMapStorage
    ChunkedSlotMapStorage& operator=(ChunkedSlotMapStorage&& other);
 
    inline SizeType Size() const { return m_size; }
-   inline SizeType Capacity() const { return m_chunks.size() * ChunkSize; }
+   inline SizeType Capacity() const { return m_chunks.size() * ChunkSlots; }
+   inline static constexpr SizeType MaxCapacity() { return MaxChunkCount * ChunkSlots; }
 
    TValue* GetPtr(TKey key) const;
 
@@ -264,54 +326,6 @@ struct ChunkedSlotMapStorage
 };
 
 
-template<
-   typename TValue,
-   typename TKey,
-   size_t MaxChunkSize,
-   typename TAllocator,
-   typename TBitsetTraits>
-ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::Chunk::Chunk(const Chunk& other)
-   : m_nextFreeChunk(other.m_nextFreeChunk)
-   , m_firstFreeSlot(other.m_firstFreeSlot)
-   , m_lastFreeSlot(other.m_lastFreeSlot)
-   , m_liveBits(other.m_liveBits)
-{
-   for (size_t i = 0; i < ChunkSize; ++i)
-   {
-      m_generations[i] = other.m_generations[i];
-      if (other.m_liveBits[i])
-      {
-         TValue* const ptr = m_slots[i].GetPtr();
-         const TValue* const otherPtr = other.m_slots[i].GetPtr();
-         new (ptr) TValue(*otherPtr);
-      }
-      else
-      {
-         m_slots[i].m_nextFreeSlot = other.m_slots[i].m_nextFreeSlot;
-      }
-   }
-}
-
-
-template<
-   typename TValue,
-   typename TKey,
-   size_t MaxChunkSize,
-   typename TAllocator,
-   typename TBitsetTraits>
-ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ChunkedSlotMapStorage(const ChunkedSlotMapStorage& other)
-   : m_size(other.m_size)
-   , m_firstFreeChunk(other.m_firstFreeChunk)
-{
-   m_chunks.resize(other.m_chunks.size());
-   
-   for (size_t i = 0; i < other.m_chunks.size(); ++i)
-   {
-      m_chunks[i] = new Chunk(*other.m_chunks[i]);
-   }
-}
-
-
 //////////////////////////////////////////////////////////////////////////
 template<typename TValue, typename TKey = uint32_t, typename TStorage = ChunkedSlotMapStorage<TValue, TKey>>
 class SlotMap
@@ -333,6 +347,7 @@ public:
    
    inline SizeType Size() const { return m_storage.Size(); }
    inline SizeType Capacity() const { return m_storage.Capacity(); }
+   inline static constexpr SizeType MaxCapacity() { return TStorage::MaxCapacity(); }
    bool Reserve(SizeType capacity);
 
    template<typename... TArgs>

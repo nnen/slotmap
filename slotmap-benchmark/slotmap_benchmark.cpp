@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "benchmark_common.h"
+#include "plf_colony.h"
 
 
 struct  
@@ -30,11 +31,6 @@ struct
    size_t m_maxAllocSize = 0;
 } g_memCounters;
 
-//bool g_memCounterEnabled = false;
-//size_t g_memAllocCount = 0;
-//size_t g_memAllocBytes = 0;
-//size_t g_maxAllocSize = 0;
-
 
 void* operator new(size_t size)
 {
@@ -48,15 +44,6 @@ void* operator new(size_t size)
       }
    }
 
-   //if (g_memCounterEnabled)
-   //{
-   //   ++g_memAllocCount;
-   //   g_memAllocBytes += size;
-   //   if (size > g_maxAllocSize)
-   //   {
-   //      g_maxAllocSize = size;
-   //   }
-   //}
    return malloc(size);
 }
 
@@ -65,6 +52,36 @@ void operator delete(void* ptr) noexcept
    ++g_memCounters.m_freeCount;
 
    free(ptr);
+}
+
+
+template<size_t Size = 64>
+struct BenchmarkValue
+{
+   uint64_t m_value = 0;
+   uint8_t m_padding[Size - sizeof(uint64_t)];
+
+   inline BenchmarkValue() {}
+   inline BenchmarkValue(uint64_t value)
+      : m_value(value)
+   {
+   }
+
+   inline operator uint64_t() const { return m_value; }
+};
+
+
+template<size_t Size>
+inline bool operator==(const BenchmarkValue<Size>& a, const BenchmarkValue<Size>& b)
+{
+   return a.m_value == b.m_value;
+}
+
+
+template<size_t Size>
+inline bool operator==(const BenchmarkValue<Size>& a, uint64_t b)
+{
+   return a.m_value == b;
 }
 
 
@@ -273,6 +290,54 @@ public:
 };
 
 
+template<typename T>
+class ColonyContainer
+{
+public:
+   using ContainerType = plf::colony<T>;
+   using ValueType = T;
+   using KeyType = typename ContainerType::iterator;
+
+   inline KeyType Insert(T value)
+   {
+      return m_colony.insert(value);
+   }
+
+   inline bool Erase(KeyType key)
+   {
+      m_colony.erase(key);
+      return true;
+   }
+
+   inline ValueType& Get(KeyType key)
+   {
+      return *key;
+   }
+   
+   inline void Clear() 
+   {
+      m_colony.clear();
+   }
+
+   inline auto Begin()
+   {
+      return m_colony.begin();
+   }
+
+   inline bool FindNext(KeyType& iter)
+   {
+      return iter != m_colony.end();
+   }
+
+   inline void Increment(KeyType& iter)
+   {
+      ++iter;
+   }
+   
+   ContainerType m_colony;
+};
+
+
 class CustomMemoryManager : public benchmark::MemoryManager
 {
 public:
@@ -333,7 +398,7 @@ void BM_InsertErase(benchmark::State& state)
       }
 
       container.Clear();
-
+      
       for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
          KeyType key = container.Insert(static_cast<ValueType>(i));
@@ -341,7 +406,7 @@ void BM_InsertErase(benchmark::State& state)
          keys[i] = key;
          ENABLE_MEM_COUNTERS();
       }
-
+      
       for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
          container.Erase(keys[i]);
@@ -359,6 +424,7 @@ void BM_InsertErase(benchmark::State& state)
 MY_BENCHMARK(BM_InsertErase, SlotMapContainer<int>, SlotMap);
 MY_BENCHMARK(BM_InsertErase, StdUnorderedMapContainer<int>, UnorderedMap);
 MY_BENCHMARK(BM_InsertErase, VectorWithFreelist<int>, Vector);
+MY_BENCHMARK(BM_InsertErase, ColonyContainer<int>, Colony);
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -368,7 +434,7 @@ void BM_InsertAccess(benchmark::State& state)
    BEFORE_BENCHMARK()
 
    using KeyType = typename TContainer::KeyType;
-   using ValueType = typename TContainer::KeyType;
+   using ValueType = typename TContainer::ValueType;
 
    const int64_t count = state.range(0);
 
@@ -377,7 +443,7 @@ void BM_InsertAccess(benchmark::State& state)
       ENABLE_MEM_COUNTERS();
 
       TContainer container;
-      uint64_t checksum = 0;
+      volatile uint64_t checksum = 0;
 
       for (size_t i = 0; i < static_cast<size_t>(count); ++i)
       {
@@ -394,6 +460,7 @@ void BM_InsertAccess(benchmark::State& state)
 MY_BENCHMARK(BM_InsertAccess, SlotMapContainer<uint64_t>, SlotMap);
 MY_BENCHMARK(BM_InsertAccess, StdUnorderedMapContainer<uint64_t>, UnorderedMap);
 MY_BENCHMARK(BM_InsertAccess, VectorWithFreelist<uint64_t>, Vector);
+MY_BENCHMARK(BM_InsertAccess, ColonyContainer<uint64_t>, Colony);
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -514,14 +581,14 @@ void BM_Iteration_ForEach(benchmark::State& state)
 }
 
 #undef ARGS
-//#define ARGS ->Arg(100)->Arg(10000)->Arg(10000000)
-#define ARGS ->ArgsProduct({{0, 30, 60, 100}, {100, 10000, 10000000}})
-MY_BENCHMARK(BM_Iteration, SlotMapContainer<uint64_t>, SlotMap);
-MY_BENCHMARK(BM_Iteration_ForEach, SlotMapContainer<uint64_t>, SlotMap);
-using SlotMapContainerStdBitset = SlotMapContainer<uint64_t, slotmap::StdBitSetTraits>;
+#define ARGS ->ArgsProduct({{0, 25, 50, 75, 100}, {1000000}})
+MY_BENCHMARK(BM_Iteration, SlotMapContainer<BenchmarkValue<>>, SlotMap);
+MY_BENCHMARK(BM_Iteration_ForEach, SlotMapContainer<BenchmarkValue<>>, SlotMap);
+using SlotMapContainerStdBitset = SlotMapContainer<BenchmarkValue<>, slotmap::StdBitSetTraits>;
 MY_BENCHMARK(BM_Iteration, SlotMapContainerStdBitset, SlotMapStdBitset);
-MY_BENCHMARK(BM_Iteration, StdUnorderedMapContainer<uint64_t>, UnorderedMap);
-MY_BENCHMARK(BM_Iteration, VectorWithFreelist<uint64_t>, Vector);
+MY_BENCHMARK(BM_Iteration, StdUnorderedMapContainer<BenchmarkValue<>>, UnorderedMap);
+MY_BENCHMARK(BM_Iteration, VectorWithFreelist<BenchmarkValue<>>, Vector);
+MY_BENCHMARK(BM_Iteration, ColonyContainer<BenchmarkValue<>>, Colony);
 
 
 BENCHMARK_MAIN();

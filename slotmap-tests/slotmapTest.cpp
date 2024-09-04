@@ -6,8 +6,10 @@
 
 #include <gtest/gtest.h>
 
-#include <unordered_set>
 #include <queue>
+#include <sstream>
+#include <type_traits>
+#include <unordered_set>
 
 
 using namespace slotmap;
@@ -29,6 +31,12 @@ struct TestValueType
       , m_sentinel(Sentinel_Ctor) 
    { 
       ++s_ctorCount; 
+   }
+   TestValueType(size_t value)
+      : m_value(static_cast<int32_t>(value))
+      , m_sentinel(Sentinel_Ctor)
+   {
+      ++s_ctorCount;
    }
    TestValueType(const TestValueType& other) 
       : m_value(other.m_value)
@@ -110,14 +118,96 @@ size_t TestValueType::s_dtorCount = 0;
 
 
 //////////////////////////////////////////////////////////////////////////
-template<typename TSlotMap, size_t TMaxCap>
+template<typename T>
+struct TypeNameTraits
+{
+   static void Get(std::ostream& out)
+   {
+      if constexpr (std::is_integral_v<T>)
+      {
+         if constexpr (std::is_unsigned_v<T>)
+         {
+            out << "u";
+         }
+         else
+         {
+            out << "i";
+         }
+         out << sizeof(T) * CHAR_BIT;
+      }
+      else
+      {
+         out << "?";
+      }
+   }
+};
+
+
+template<typename T>
+struct SlotMapNameTraits
+{
+};
+
+
+template<typename T, typename TKey>
+struct SlotMapNameTraits<SlotMap<T, TKey, ChunkedSlotMapStorage<T, TKey>>>
+{
+   static void Get(std::ostream& out)
+   {
+      out << "SlotMap/";
+      TypeNameTraits<TKey>::Get(out);
+   }
+
+   static void GetStorageInfo(std::ostream& out)
+   {
+      using Storage = ChunkedSlotMapStorage<T, TKey>;
+
+      out << "Chunked:" << std::endl;
+      out << "  Value size: " << sizeof(T) << std::endl;
+      out << "  MaxChunkSlots: " << Storage::MaxChunkSlots << std::endl;
+      out << "  ChunkSlots: " << Storage::ChunkSlots << std::endl;
+      out << "  GenerationBitSize: " << Storage::GenerationBitSize << std::endl;
+      out << "  SlotIndexBitSize: " << Storage::SlotIndexBitSize << std::endl;
+      out << "  ChunkIndexBitSize: " << Storage::ChunkIndexBitSize;
+   }
+};
+
+
+template<typename T, size_t TCapacity, typename TKey>
+struct SlotMapNameTraits<SlotMap<T, TKey, FixedSlotMapStorage<T, TKey, TCapacity>>>
+{
+   static void Get(std::ostream& out)
+   {
+      out << "FixedSlotMap/";
+      TypeNameTraits<TKey>::Get(out);
+      out << "/" << TCapacity;
+   }
+
+   static void GetStorageInfo(std::ostream& out)
+   {
+      out << "Fixed";
+   }
+};
+
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TSlotMap, size_t TMaxSize>
 struct SlotMapTestTraits
 {
    using MapType = TSlotMap;
    using ValueType = typename MapType::ValueType;
    using KeyType = typename MapType::KeyType;
 
-   static constexpr size_t MaxCap = TMaxCap;
+   static constexpr size_t MaxSize = TMaxSize;
+
+   static std::string GetName(int i)
+   {
+      std::stringstream ss;
+      ss << i << "/";
+      SlotMapNameTraits<TSlotMap>::Get(ss);
+      ss << "/" << MaxSize;
+      return ss.str();
+   }
 };
 
 
@@ -133,12 +223,30 @@ public:
    using Pairs = std::unordered_map<KeyType, ValueType>;
    using Keys = std::unordered_set<KeyType>;
 
+   static constexpr size_t MaxSize = Traits::MaxSize;
+
    virtual void SetUp() override
    {
       TestValueType::ResetCounters();
       m_valueCounter = 0;
    }
 
+   ::testing::AssertionResult CheckMaxCapacity()
+   {
+      std::cerr << "Max capacity: " << MapType::MaxCapacity() << std::endl;
+
+      SlotMapNameTraits<MapType>::GetStorageInfo(std::cerr);
+
+      std::cerr << std::endl;
+
+      if (MapType::MaxCapacity() < MaxSize)
+      {
+         return ::testing::AssertionFailure() << "Max capacity of the slotmap " << MapType::MaxCapacity() << 
+            " is lower than the max size of the test " << MaxSize << "!";
+      }
+      return ::testing::AssertionSuccess();
+   }
+   
    ::testing::AssertionResult SetUpTestData(size_t count)
    {
       return SetUpTestData(m_map1, m_items, count);
@@ -148,7 +256,8 @@ public:
    {
       for (size_t i = 0; i < count; ++i)
       {
-         ValueType value = static_cast<ValueType>(m_valueCounter++);
+         ++m_valueCounter;
+         ValueType value = static_cast<ValueType>(m_valueCounter);
          const KeyType key = map.Emplace(value);
          if (values.count(key) != 0)
          {
@@ -336,15 +445,33 @@ public:
 };
 
 
+struct SlotMapTestNameGenerator {
+   template <typename T>
+   static std::string GetName(int i) 
+   {
+      return T::GetName(i);
+   }
+};
+
+
 using SlotMapTestTypes = ::testing::Types<
    SlotMapTestTraits<FixedSlotMap<TestValueType, 64>, 64>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 255, uint16_t>, 255>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 1024>, 1024>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 1024, uint64_t>, 1024>,
+   SlotMapTestTraits<SlotMap<TestValueType, uint16_t>, 128>,
    SlotMapTestTraits<SlotMap<TestValueType>, 10000>,
    SlotMapTestTraits<SlotMap<TestValueType>, 1000000>,
+   SlotMapTestTraits<SlotMap<TestValueType>, 14614082>,
    SlotMapTestTraits<SlotMap<TestValueType, uint64_t>, 1000000>>;
-TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes);
+TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes, SlotMapTestNameGenerator);
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, CheckMaxCapacity)
+{
+   ASSERT_SUCCESS(this->CheckMaxCapacity());
+}
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -365,9 +492,9 @@ TYPED_TEST(SlotMapTest, CopyCtor)
 {
    using Traits = typename TestFixture::Traits;
 
-   const size_t count = Traits::MaxCap >> 1;
+   const size_t count = Traits::MaxSize >> 1;
 
-   ASSERT_TRUE(TestFixture::SetUpTestData(this->m_map1, this->m_items, count));
+   ASSERT_SUCCESS(TestFixture::SetUpTestData(this->m_map1, this->m_items, count));
    ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 2));
 
    {
@@ -516,20 +643,20 @@ TYPED_TEST(SlotMapTest, Fill)
    MapType map;
    std::vector<KeyType> keys;
    std::vector<KeyType> newKeys;
-   keys.reserve(Traits::MaxCap);
-   newKeys.reserve(Traits::MaxCap);
+   keys.reserve(Traits::MaxSize);
+   newKeys.reserve(Traits::MaxSize);
 
    // Fill the map
-   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   for (size_t i = 0; i < Traits::MaxSize; ++i)
    {
       const KeyType key = map.Emplace(static_cast<int>(i));
       keys.push_back(key);
    }
 
-   ASSERT_EQ(Traits::MaxCap, map.Size());
+   ASSERT_EQ(Traits::MaxSize, map.Size());
 
    // Check all keys are valid
-   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   for (size_t i = 0; i < Traits::MaxSize; ++i)
    {
       const KeyType key = keys[i];
       const ValueType* ptr = map.GetPtr(key);
@@ -557,13 +684,13 @@ TYPED_TEST(SlotMapTest, Fill)
    }
 
    // Fill the map again
-   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   for (size_t i = 0; i < Traits::MaxSize; ++i)
    {
       const KeyType key = map.Emplace(static_cast<int>(i));
       newKeys.push_back(key);
    }
 
-   ASSERT_EQ(Traits::MaxCap, map.Size());
+   ASSERT_EQ(Traits::MaxSize, map.Size());
 }
 
 
@@ -577,20 +704,20 @@ TYPED_TEST(SlotMapTest, Overfill)
 
    MapType map;
    std::unordered_set<KeyType> keys;
-   keys.reserve(Traits::MaxCap);
+   keys.reserve(Traits::MaxSize);
 
    // Fill the map
-   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   for (size_t i = 0; i < Traits::MaxSize; ++i)
    {
       const KeyType key = map.Emplace(static_cast<int>(i));
       keys.insert(key);
    }
 
-   ASSERT_EQ(Traits::MaxCap, map.Size());
+   ASSERT_EQ(Traits::MaxSize, map.Size());
    
    const KeyType key = map.Emplace(123);
    ASSERT_TRUE(keys.count(key) == 0);
-   ASSERT_TRUE(Traits::MaxCap <= map.Size());
+   ASSERT_TRUE(Traits::MaxSize <= map.Size());
 
    ASSERT_TRUE(TestFixture::CheckIteration(map));
 }
@@ -608,7 +735,7 @@ TYPED_TEST(SlotMapTest, InsertAndErase)
    std::queue<KeyType> keyQueue;
 
    // Fill the map
-   while (map.Size() < Traits::MaxCap)
+   while (map.Size() < Traits::MaxSize)
    {
       KeyType key;
 
@@ -654,7 +781,7 @@ TYPED_TEST(SlotMapTest, Swap)
 {
    using Traits = typename TestFixture::Traits;
 
-   const size_t count = Traits::MaxCap >> 1;
+   const size_t count = Traits::MaxSize >> 1;
 
    ASSERT_TRUE(TestFixture::SetUpTestData(this->m_map1, this->m_items, count));
    ASSERT_TRUE(TestValueType::CheckLiveInstances(count * 2));
@@ -677,15 +804,15 @@ TYPED_TEST(SlotMapTest, Clear)
 
    MapType map;
    std::vector<KeyType> keys;
-   keys.reserve(Traits::MaxCap);
+   keys.reserve(Traits::MaxSize);
 
-   for (size_t i = 0; i < Traits::MaxCap; ++i)
+   for (size_t i = 0; i < Traits::MaxSize; ++i)
    {
       const KeyType key = map.Emplace(static_cast<int>(i));
       keys.push_back(key);
    }
 
-   ASSERT_EQ(Traits::MaxCap, map.Size());
+   ASSERT_EQ(Traits::MaxSize, map.Size());
    map.Clear();
    ASSERT_EQ(0, map.Size());
 
@@ -718,9 +845,66 @@ TYPED_TEST(SlotMapTest, Iteration)
    using ValueType = typename MapType::ValueType;
    using Traits = typename TestFixture::Traits;
 
-   ASSERT_TRUE(TestFixture::SetUpTestData(Traits::MaxCap));
+   ASSERT_TRUE(TestFixture::SetUpTestData(TestFixture::MaxSize));
    ASSERT_TRUE(TestFixture::CheckIteration());
 }
 
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TTraits>
+class GetChunkSizeTest : public testing::Test
+{
+public:
+   using ValueType = typename TTraits::ValueType;
+   using IndexType = typename TTraits::IndexType;
+   using GenerationType = typename TTraits::GenerationType;
+   using BitsetTraits = typename TTraits::BitsetTraits;
+   static constexpr size_t SlotCount = TTraits::SlotCount;
+};
+
+template<typename TValue, typename TIndex, typename TGeneration, typename TBitsetTraits, size_t TSlotCount>
+struct GetChunkSizeTestTraits
+{
+   using ValueType = TValue;
+   using IndexType = TIndex;
+   using GenerationType = TGeneration;
+   using BitsetTraits = TBitsetTraits;
+   static constexpr size_t SlotCount = TSlotCount;
+};
+
+using GetChunkSizeTestTypes = ::testing::Types<
+   GetChunkSizeTestTraits<int, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 64>,
+   GetChunkSizeTestTraits<int, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 128>,
+   GetChunkSizeTestTraits<int, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 256>,
+   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 64>,
+   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 128>,
+   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 256>,
+   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 64>,
+   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 128>,
+   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 256>,
+   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, StdBitSetTraits, 64>,
+   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, StdBitSetTraits, 128>,
+   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, StdBitSetTraits, 256>,
+   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, StdBitSetTraits, 64>,
+   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, StdBitSetTraits, 128>,
+   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, StdBitSetTraits, 256>
+   >;
+TYPED_TEST_SUITE(GetChunkSizeTest, GetChunkSizeTestTypes);
+
+TYPED_TEST(GetChunkSizeTest, GetChunkMaxSlots)
+{
+   using ValueType = typename TestFixture::ValueType;
+   using IndexType = typename TestFixture::IndexType;
+   using GenerationType = typename TestFixture::GenerationType;
+   using BitSetTraits = typename TestFixture::BitsetTraits;
+
+   constexpr size_t SlotCount = ::slotmap::GetChunkMaxSlots<
+      ::slotmap::MinChunkSlots, ::slotmap::DefaultMaxChunkSize, ::slotmap::DefaultMaxChunkSize,
+      ValueType, IndexType, GenerationType, BitSetTraits>();
+
+   using ChunkType = ::slotmap::ChunkTpl<SlotCount, ValueType, IndexType, GenerationType, BitSetTraits>;
+   
+   ASSERT_LE(sizeof(ChunkType), ::slotmap::DefaultMaxChunkSize);
+}
 
 

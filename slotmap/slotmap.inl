@@ -202,7 +202,7 @@ template<
    typename TBitset>
 bool FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FindNextKey(TKey& key) const
 {
-   TKey slotIndex = TBitset::template FindNextBitSet(m_liveBits, key & SlotIndexMask);
+   TKey slotIndex = static_cast<TKey>(TBitset::template FindNextBitSet(m_liveBits, key & SlotIndexMask));
 
    if (slotIndex >= TCapacity)
    {
@@ -349,6 +349,51 @@ void FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::Clear()
 
 
 //////////////////////////////////////////////////////////////////////////
+template<size_t TSlotCount, typename TValue, typename TIndexType, typename TGenerationType, typename TBitsetTraits>
+ChunkTpl<TSlotCount, TValue, TIndexType, TGenerationType, TBitsetTraits>::ChunkTpl(const ChunkTpl& other) 
+   : m_nextFreeChunk(other.m_nextFreeChunk)
+   , m_firstFreeSlot(other.m_firstFreeSlot)
+   , m_lastFreeSlot(other.m_lastFreeSlot)
+   , m_liveBits(other.m_liveBits)
+{
+   for (size_t i = 0; i < TSlotCount; ++i)
+   {
+      m_generations[i] = other.m_generations[i];
+      if (other.m_liveBits[i])
+      {
+         TValue* const ptr = m_slots[i].GetPtr();
+         const TValue* const otherPtr = other.m_slots[i].GetPtr();
+         new (ptr) TValue(*otherPtr);
+      }
+      else
+      {
+         m_slots[i].m_nextFreeSlot = other.m_slots[i].m_nextFreeSlot;
+      }
+   }
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator,
+   typename TBitsetTraits>
+ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ChunkedSlotMapStorage(const ChunkedSlotMapStorage& other)
+   : m_size(other.m_size)
+   , m_firstFreeChunk(other.m_firstFreeChunk)
+{
+   m_chunks.resize(other.m_chunks.size());
+   
+   for (size_t i = 0; i < other.m_chunks.size(); ++i)
+   {
+      m_chunks[i] = new Chunk(*other.m_chunks[i]);
+   }
+}
+
+
+//////////////////////////////////////////////////////////////////////////
 template<
    typename TValue,
    typename TKey,
@@ -402,7 +447,7 @@ TValue* ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTra
    
    Chunk& chunk = *m_chunks[chunkIndex];
    const KeyType slotIndex = (key >> SlotIndexShift) & SlotIndexMask;
-   if ((slotIndex >= ChunkSize) || !chunk.m_liveBits[slotIndex])
+   if ((slotIndex >= ChunkSlots) || !chunk.m_liveBits[slotIndex])
    {
       return nullptr;
    }
@@ -432,9 +477,9 @@ bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
    for (; chunkIndex < m_chunks.size(); ++chunkIndex)
    {
       Chunk& chunk = *m_chunks[chunkIndex];
-      slotIndex = TBitsetTraits::template FindNextBitSet(chunk.m_liveBits, slotIndex);
+      slotIndex = static_cast<KeyType>(TBitsetTraits::template FindNextBitSet(chunk.m_liveBits, slotIndex));
 
-      if (slotIndex < ChunkSize)
+      if (slotIndex < ChunkSlots)
       {
          key = (static_cast<KeyType>(chunk.m_generations[slotIndex]) << GenerationShift) |
             (static_cast<KeyType>(slotIndex) << SlotIndexShift) |
@@ -463,7 +508,7 @@ TKey ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
 
    ++slotIndex;
 
-   if (slotIndex < ChunkSize)
+   if (slotIndex < ChunkSlots)
    {
       return (slotIndex << SlotIndexShift) | chunkIndex;
    }
@@ -507,13 +552,13 @@ void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
 {
    Chunk* newChunk = new Chunk();
 
-   for (size_t i = 0; i < ChunkSize - 1; ++i)
+   for (size_t i = 0; i < ChunkSlots - 1; ++i)
    {
       newChunk->m_slots[i].m_nextFreeSlot = i + 1;
    }
-   newChunk->m_slots[ChunkSize - 1].m_nextFreeSlot = -1;
+   newChunk->m_slots[ChunkSlots - 1].m_nextFreeSlot = -1;
    newChunk->m_firstFreeSlot = 0;
-   newChunk->m_lastFreeSlot = ChunkSize - 1;
+   newChunk->m_lastFreeSlot = ChunkSlots - 1;
    
    newChunk->m_nextFreeChunk = m_firstFreeChunk;
    m_firstFreeChunk = static_cast<IndexType>(m_chunks.size());
@@ -585,7 +630,7 @@ bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
 
    Chunk& chunk = *m_chunks[chunkIndex];
    const KeyType slotIndex = (key >> SlotIndexShift) & SlotIndexMask;
-   if ((slotIndex >= ChunkSize) || !chunk.m_liveBits[slotIndex])
+   if ((slotIndex >= ChunkSlots) || !chunk.m_liveBits[slotIndex])
    {
       return false;
    }
@@ -701,7 +746,7 @@ void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
    {
       Chunk* const chunk = m_chunks[chunkIndex];
 
-      for (IndexType slotIndex = 0; slotIndex < ChunkSize; ++slotIndex)
+      for (IndexType slotIndex = 0; slotIndex < ChunkSlots; ++slotIndex)
       {
          if (chunk->m_liveBits[slotIndex])
          {
