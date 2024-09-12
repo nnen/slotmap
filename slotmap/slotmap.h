@@ -110,6 +110,8 @@ template<
    inline constexpr SizeType Capacity() const { return StaticCapacity; }
    inline static constexpr SizeType MaxCapacity() { return StaticCapacity; }
 
+   bool Reserve(size_t capacity);
+
    template<typename TSelf>
    static inline auto GetPtrTpl(TSelf self, TKey key);
 
@@ -130,6 +132,7 @@ template<
 
    SizeType m_size = 0;
    IndexType m_firstFreeSlot = -1;
+   IndexType m_maxUsedSlot = 0;
    BitsetType m_liveBits;
    GenerationType m_generations[TCapacity];
    Slot m_slots[TCapacity];
@@ -239,7 +242,6 @@ struct ChunkedSlotMapStorage
    using SizeType = size_t;
    using IndexType = ptrdiff_t;
 
-   
    static_assert(std::is_unsigned_v<KeyType>, "Slotmap key type must be an unsigned integer type.");
    static_assert(sizeof(KeyType) > sizeof(GenerationType), "The size of slotmap key type must be greater than the size of generation type.");
 
@@ -271,23 +273,31 @@ struct ChunkedSlotMapStorage
    using Slot = typename Chunk::Slot;
    static_assert(sizeof(Chunk) <= MaxChunkSize, "Chunk size is too large.");
 
-   class Iterator
+   template<bool IsConst>
+   class IteratorTpl
    {
    public:
-      inline Iterator(ChunkedSlotMapStorage* storage) : m_storage(storage) {}
+      using ReferenceType = std::conditional_t<IsConst, const ValueType&, ValueType&>;
+      using PointerType = std::conditional_t<IsConst, const ValueType*, ValueType*>;   
+      
+      inline IteratorTpl(ChunkedSlotMapStorage* storage) : m_storage(storage) {}
 
-      bool operator==(const Iterator& other) const;
-      bool operator!=(const Iterator& other) const;
+      bool operator==(const IteratorTpl& other) const;
+      bool operator!=(const IteratorTpl& other) const;
 
-      Iterator& operator++();
-      Iterator& operator++(int);
+      IteratorTpl& operator++();
+      IteratorTpl& operator++(int);
 
    private:
-      ChunkedSlotMapStorage* m_storage = nullptr;
-      KeyType m_chunkIndex = 0;
-      KeyType m_slotIndex = 0;
-   };
+      using SlotType = std::conditional_t<IsConst, const Slot, Slot>;
 
+      ChunkedSlotMapStorage* m_storage = nullptr;
+      IndexType m_chunkIndex = 0;
+      IndexType m_slotIndex = 0;
+   };
+   using Iterator = IteratorTpl<false>;
+   using ConstIterator = IteratorTpl<true>;
+   
    ChunkedSlotMapStorage() = default;
    ChunkedSlotMapStorage(const ChunkedSlotMapStorage&);
    ChunkedSlotMapStorage(ChunkedSlotMapStorage&& other);
@@ -300,7 +310,9 @@ struct ChunkedSlotMapStorage
    inline SizeType Size() const { return m_size; }
    inline SizeType Capacity() const { return m_chunks.size() * ChunkSlots; }
    inline static constexpr SizeType MaxCapacity() { return MaxChunkCount * ChunkSlots; }
-
+   
+   bool Reserve(size_t capacity);
+   
    TValue* GetPtr(TKey key) const;
 
    bool FindNextKey(TKey& key) const;
@@ -310,6 +322,8 @@ struct ChunkedSlotMapStorage
    void ForEachSlot(TFunc func) const;
 
    void AllocateChunk();
+   static void InitializeChunk(Chunk* chunk);
+   void AppendChunkToFreeList(Chunk* chunk, IndexType chunkIndex);
    KeyType AllocateSlot(ValueType*& outPtr);
    bool FreeSlot(KeyType key);
    void FreeSlotByIndex(IndexType chunkIndex, IndexType slotIndex);
@@ -322,6 +336,7 @@ struct ChunkedSlotMapStorage
 
    SizeType m_size = 0;
    IndexType m_firstFreeChunk = -1;
+   SizeType m_maxUsedChunk = 0;
    std::vector<Chunk*, ChunkPtrAllocator> m_chunks;
 };
 
@@ -348,7 +363,8 @@ public:
    inline SizeType Size() const { return m_storage.Size(); }
    inline SizeType Capacity() const { return m_storage.Capacity(); }
    inline static constexpr SizeType MaxCapacity() { return TStorage::MaxCapacity(); }
-   bool Reserve(SizeType capacity);
+
+   inline bool Reserve(SizeType capacity) { return m_storage.Reserve(capacity); }
 
    template<typename... TArgs>
    TKey Emplace(TArgs&&... args);

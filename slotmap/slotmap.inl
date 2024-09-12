@@ -43,12 +43,6 @@ template<
    typename TBitset>
 FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FixedSlotMapStorage()
 {
-   m_firstFreeSlot = 0;
-   for (SizeType i = 0; i < TCapacity - 1; ++i)
-   {
-      m_slots[i].m_nextFreeSlot = i + 1;
-   }
-   m_slots[TCapacity - 1].m_nextFreeSlot = -1;
 }
 
 
@@ -61,9 +55,10 @@ template<
 FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FixedSlotMapStorage(const FixedSlotMapStorage& other)
    : m_size(other.m_size)
    , m_firstFreeSlot(other.m_firstFreeSlot)
+   , m_maxUsedSlot(other.m_maxUsedSlot)
    , m_liveBits(other.m_liveBits)
 {
-   for (size_t i = 0; i < StaticCapacity; ++i)
+   for (size_t i = 0; i < m_maxUsedSlot; ++i)
    {
       m_generations[i] = other.m_generations[i];
       if (other.m_liveBits[i])
@@ -87,31 +82,8 @@ template<
    size_t TCapacity,
    typename TBitset>
 FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FixedSlotMapStorage(FixedSlotMapStorage&& other)
-   : m_size(other.m_size)
-   , m_firstFreeSlot(other.m_firstFreeSlot)
-   , m_liveBits(std::move(other.m_liveBits))
 {
-   for (SizeType i = 0; i < TCapacity; ++i)
-   {
-      m_generations[i] = other.m_generations[i];
-      if (m_liveBits[i])
-      {
-         TValue* ptr = m_slots[i].GetPtr();
-         TValue* otherPtr = other.m_slots[i].GetPtr();
-         new (ptr) TValue(std::move(*otherPtr));
-         otherPtr->~TValue();
-      }
-      else
-      {
-         m_slots[i].m_nextFreeSlot = other.m_slots[i].m_nextFreeSlot;
-      }
-      other.m_slots[i].m_nextFreeSlot = i + 1;
-   }
-
-   other.m_size = 0;
-   other.m_firstFreeSlot = 0;
-   other.m_liveBits.reset();
-   other.m_slots[TCapacity - 1].m_nextFreeSlot = -1;
+   *this = std::move(other);
 }
 
 
@@ -137,33 +109,49 @@ FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>& FixedSlotMapStorage<TValu
 {
    Clear();
 
-   for (size_t i = 0; i < StaticCapacity; ++i)
+   memcpy(m_generations, other.m_generations, sizeof(m_generations));
+
+   for (size_t i = 0; i < other.m_maxUsedSlot; ++i)
    {
-      m_generations[i] = other.m_generations[i];
       if (other.m_liveBits[i])
       {
          TValue* ptr = m_slots[i].GetPtr();
          TValue* otherPtr = other.m_slots[i].GetPtr();
          new (ptr) TValue(std::move(*otherPtr));
-         otherPtr->~TValue();
+         if constexpr (!std::is_trivially_destructible_v<TValue>)
+         {
+            otherPtr->~TValue();
+         }
       }
       else
       {
          m_slots[i].m_nextFreeSlot = other.m_slots[i].m_nextFreeSlot;
       }
-      other.m_slots[i].m_nextFreeSlot = i + 1;
    }
-
+   
    m_size = other.m_size;
+   m_maxUsedSlot = other.m_maxUsedSlot;
    m_firstFreeSlot = other.m_firstFreeSlot;
    m_liveBits = std::move(other.m_liveBits);
-
+   
    other.m_size = 0;
-   other.m_firstFreeSlot = 0;
+   other.m_maxUsedSlot = 0;
+   other.m_firstFreeSlot = -1;
    other.m_liveBits.reset();
-   other.m_slots[TCapacity - 1].m_nextFreeSlot = -1;
 
    return *this;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t TCapacity,
+   typename TBitsetTraits>
+bool FixedSlotMapStorage<TValue, TKey, TCapacity, TBitsetTraits>::Reserve(size_t capacity)
+{
+   return capacity <= StaticCapacity;
 }
 
 
@@ -179,7 +167,7 @@ auto FixedSlotMapStorage<TValue, TKey, Capacity, TBitset>::GetPtrTpl(TSelf self,
    using ReturnType = decltype(self->m_slots[0].GetPtr());
 
    const TKey slotIndex = key & SlotIndexMask;
-   if ((slotIndex >= StaticCapacity) || !self->m_liveBits[slotIndex])
+   if ((slotIndex >= self->m_maxUsedSlot) || !self->m_liveBits[slotIndex])
    {
       return static_cast<ReturnType>(nullptr);
    }
@@ -235,7 +223,7 @@ template<
 template<typename TFunc>
 void FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::ForEachSlot(TFunc func) const
 {
-   m_liveBits.ForEachSetBit([&](size_t index)
+   m_liveBits.ForEachSetBit(0, m_maxUsedSlot, [&](size_t index)
    {
       const TKey key = (static_cast<TKey>(m_generations[index]) << GenerationShift) | static_cast<TKey>(index);
       func(key, *m_slots[index].GetPtr());
@@ -251,22 +239,35 @@ template<
    typename TBitset>
 TKey FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::AllocateSlot(TValue*& outPtr)
 {
-   if (m_firstFreeSlot < 0)
+   if (m_firstFreeSlot >= 0)
    {
-      return InvalidKey;
+      const SizeType slotIndex = m_firstFreeSlot;
+      assert(!m_liveBits[slotIndex]);
+      m_firstFreeSlot = m_slots[slotIndex].m_nextFreeSlot;
+
+      outPtr = m_slots[slotIndex].GetPtr();
+      ++m_generations[slotIndex];
+      m_liveBits.set(slotIndex);
+
+      ++m_size;
+
+      return (static_cast<TKey>(m_generations[slotIndex]) << GenerationShift) | static_cast<TKey>(slotIndex);
    }
-   
-   const SizeType slotIndex = m_firstFreeSlot;
-   assert(!m_liveBits[slotIndex]);
-   m_firstFreeSlot = m_slots[slotIndex].m_nextFreeSlot;
+   else if (m_maxUsedSlot < TCapacity)
+   {
+      const SizeType slotIndex = m_maxUsedSlot;
 
-   outPtr = m_slots[slotIndex].GetPtr();
-   ++m_generations[slotIndex];
-   m_liveBits.set(slotIndex);
+      outPtr = m_slots[slotIndex].GetPtr();
+      ++m_generations[slotIndex];
+      m_liveBits.set(slotIndex);
 
-   ++m_size;
+      ++m_size;
+      ++m_maxUsedSlot;
 
-   return (static_cast<TKey>(m_generations[slotIndex]) << GenerationShift) | static_cast<TKey>(slotIndex);
+      return (static_cast<TKey>(m_generations[slotIndex]) << GenerationShift) | static_cast<TKey>(slotIndex);
+   }
+
+   return InvalidKey;
 }
 
 
@@ -289,6 +290,8 @@ bool FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FreeSlot(KeyType key
    {
       return false;
    }
+   
+   assert(slotIndex < m_maxUsedSlot);
 
    if constexpr (!std::is_trivially_destructible_v<TValue>)
    {
@@ -328,22 +331,18 @@ template<
    typename TBitset>
 void FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::Clear()
 {
-   for (size_t slotIndex = 0; slotIndex < TCapacity; ++slotIndex)
+   if constexpr (!std::is_trivially_destructible_v<TValue>)
    {
-      if (m_liveBits[slotIndex])
+      TBitset::ForEachSetBit(0, m_maxUsedSlot, m_liveBits, [&](size_t slotIndex)
       {
-         if constexpr (!std::is_trivially_destructible_v<TValue>)
-         {
-            m_slots[slotIndex].GetPtr()->~TValue();
-         }
-
-         m_slots[slotIndex].m_nextFreeSlot = m_firstFreeSlot;
-         m_firstFreeSlot = static_cast<IndexType>(slotIndex);
-
-         m_liveBits.reset(slotIndex);
-      }
+         m_slots[slotIndex].GetPtr()->~TValue();
+      });
    }
    
+   m_maxUsedSlot = 0;
+   m_firstFreeSlot = -1;
+   
+   m_liveBits.reset();
    m_size = 0;
 }
 
@@ -383,10 +382,10 @@ template<
 ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ChunkedSlotMapStorage(const ChunkedSlotMapStorage& other)
    : m_size(other.m_size)
    , m_firstFreeChunk(other.m_firstFreeChunk)
+   , m_maxUsedChunk(other.m_maxUsedChunk)
 {
-   m_chunks.resize(other.m_chunks.size());
-   
-   for (size_t i = 0; i < other.m_chunks.size(); ++i)
+   m_chunks.resize(m_maxUsedChunk);
+   for (size_t i = 0; i < m_maxUsedChunk; ++i)
    {
       m_chunks[i] = new Chunk(*other.m_chunks[i]);
    }
@@ -403,10 +402,12 @@ template<
 ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ChunkedSlotMapStorage(ChunkedSlotMapStorage&& other)
    : m_size(other.m_size)
    , m_firstFreeChunk(other.m_firstFreeChunk)
+   , m_maxUsedChunk(other.m_maxUsedChunk)
    , m_chunks(std::move(other.m_chunks))
 {
    other.m_size = 0;
    other.m_firstFreeChunk = -1;
+   other.m_maxUsedChunk = 0;
 }
 
 
@@ -421,12 +422,52 @@ ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>& Ch
 {
    m_size = other.m_size;
    m_firstFreeChunk = other.m_firstFreeChunk;
+   m_maxUsedChunk = other.m_maxUsedChunk;
    m_chunks = std::move(other.m_chunks);
 
    other.m_size = 0;
    other.m_firstFreeChunk = -1;
+   other.m_maxUsedChunk = 0;
 
    return *this;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator,
+   typename TBitsetTraits>
+bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::Reserve(size_t capacity)
+{
+   if (capacity <= Capacity())
+   {
+      return true;
+   }
+
+   if (capacity > MaxCapacity())
+   {
+      return false;
+   }
+   
+   const size_t chunkCount = (capacity + ChunkSlots - 1) / ChunkSlots;
+   assert(chunkCount > m_chunks.size());
+   assert(chunkCount <= MaxChunkCount);
+   if (chunkCount > MaxChunkCount)
+   {
+      return false;
+   }
+   
+   m_chunks.reserve(chunkCount);
+   while (m_chunks.size() < chunkCount)
+   {
+      m_chunks.push_back(new Chunk());
+      //AllocateChunk();
+   }
+   
+   return true;
 }
 
 
@@ -440,7 +481,7 @@ template<
 TValue* ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::GetPtr(TKey key) const
 {
    const KeyType chunkIndex = key & ChunkIndexMask;
-   if (chunkIndex >= m_chunks.size())
+   if (chunkIndex >= m_maxUsedChunk)
    {
       return nullptr;
    }
@@ -474,7 +515,7 @@ bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
    KeyType chunkIndex = key & ChunkIndexMask;
    KeyType slotIndex = (key >> SlotIndexShift) & SlotIndexMask;
 
-   for (; chunkIndex < m_chunks.size(); ++chunkIndex)
+   for (; chunkIndex < m_maxUsedChunk; ++chunkIndex)
    {
       Chunk& chunk = *m_chunks[chunkIndex];
       slotIndex = static_cast<KeyType>(TBitsetTraits::template FindNextBitSet(chunk.m_liveBits, slotIndex));
@@ -527,7 +568,7 @@ template<
 template<typename TFunc>
 void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ForEachSlot(TFunc func) const
 {
-   for (size_t chunkIndex = 0; chunkIndex < m_chunks.size(); ++chunkIndex)
+   for (size_t chunkIndex = 0; chunkIndex < m_maxUsedChunk; ++chunkIndex)
    {
       const Chunk* chunk = m_chunks[chunkIndex];
       chunk->m_liveBits.ForEachSetBit([&](size_t slotIndex)
@@ -550,22 +591,60 @@ template<
    typename TBitsetTraits>
 void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::AllocateChunk()
 {
-   Chunk* newChunk = new Chunk();
+   Chunk* chunk = nullptr;
+   IndexType chunkIndex = -1;
 
+   if (m_maxUsedChunk < m_chunks.size())
+   {
+      chunkIndex = m_maxUsedChunk;
+      chunk = m_chunks[m_maxUsedChunk];
+   }
+   else
+   {
+      chunk = new Chunk();
+      chunkIndex = static_cast<IndexType>(m_chunks.size());
+      m_chunks.push_back(chunk);
+   }
+
+   ++m_maxUsedChunk;
+
+   InitializeChunk(chunk);
+   AppendChunkToFreeList(chunk, chunkIndex);
+   
+   SLOTMAP_CHUNK_INVARIANTS(chunk);
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator,
+   typename TBitsetTraits>
+void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::InitializeChunk(Chunk* chunk)
+{
    for (size_t i = 0; i < ChunkSlots - 1; ++i)
    {
-      newChunk->m_slots[i].m_nextFreeSlot = i + 1;
+      chunk->m_slots[i].m_nextFreeSlot = i + 1;
    }
-   newChunk->m_slots[ChunkSlots - 1].m_nextFreeSlot = -1;
-   newChunk->m_firstFreeSlot = 0;
-   newChunk->m_lastFreeSlot = ChunkSlots - 1;
-   
-   newChunk->m_nextFreeChunk = m_firstFreeChunk;
-   m_firstFreeChunk = static_cast<IndexType>(m_chunks.size());
+   chunk->m_slots[ChunkSlots - 1].m_nextFreeSlot = -1;
+   chunk->m_firstFreeSlot = 0;
+   chunk->m_lastFreeSlot = ChunkSlots - 1;
+}
 
-   m_chunks.push_back(newChunk);
-   
-   SLOTMAP_CHUNK_INVARIANTS(newChunk);
+
+//////////////////////////////////////////////////////////////////////////
+template<
+   typename TValue,
+   typename TKey,
+   size_t MaxChunkSize,
+   typename TAllocator,
+   typename TBitsetTraits>
+void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::AppendChunkToFreeList(Chunk* chunk, IndexType chunkIndex)
+{
+   chunk->m_nextFreeChunk = m_firstFreeChunk;
+   m_firstFreeChunk = chunkIndex;
 }
 
 
@@ -623,7 +702,7 @@ template<
 bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::FreeSlot(KeyType key)
 {
    const KeyType chunkIndex = key & ChunkIndexMask;
-   if (chunkIndex >= m_chunks.size())
+   if (chunkIndex >= m_maxUsedChunk)
    {
       return false;
    }
@@ -642,7 +721,10 @@ bool ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
    }
 
    Slot* const slot = chunk.m_slots + slotIndex;
-   slot->GetPtr()->~TValue();
+   if constexpr (!std::is_trivially_destructible_v<TValue>)
+   {
+      slot->GetPtr()->~TValue();
+   }
 
    slot->m_nextFreeSlot = chunk.m_firstFreeSlot;
    const bool isChunkInFreeList = (chunk.m_firstFreeSlot >= 0);
@@ -716,6 +798,7 @@ void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
 {
    std::swap(m_size, other.m_size);
    std::swap(m_firstFreeChunk, other.m_firstFreeChunk);
+   std::swap(m_maxUsedChunk, other.m_maxUsedChunk);
    std::swap(m_chunks, other.m_chunks);
 }
 
@@ -729,31 +812,30 @@ template<
    typename TBitsetTraits>
 void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::Clear()
 {
-   if (m_chunks.size() == 0)
+   if (m_maxUsedChunk == 0)
    {
       return;
    }
-
-   m_firstFreeChunk = 0;
-   m_chunks.back()->m_nextFreeChunk = -1;
-
-   for (size_t i = 0; i < m_chunks.size() - 1; ++i)
+   
+   if constexpr (!std::is_trivially_destructible_v<TValue>)
    {
-      m_chunks[i]->m_nextFreeChunk = i + 1;
-   }
-
-   for (IndexType chunkIndex = 0; chunkIndex < static_cast<IndexType>(m_chunks.size()); ++chunkIndex)
-   {
-      Chunk* const chunk = m_chunks[chunkIndex];
-
-      for (IndexType slotIndex = 0; slotIndex < ChunkSlots; ++slotIndex)
+      for (IndexType chunkIndex = 0; chunkIndex < m_maxUsedChunk; ++chunkIndex)
       {
-         if (chunk->m_liveBits[slotIndex])
+         Chunk* const chunk = m_chunks[chunkIndex];
+
+         TBitsetTraits::ForEachSetBit(chunk->m_liveBits, [&](size_t slotIndex)
          {
-            FreeSlotByIndex(chunkIndex, slotIndex);
-         }
+            Slot* const slot = chunk->m_slots + slotIndex;
+            slot->GetPtr()->~TValue();
+         });
+         
+         chunk->m_liveBits.reset();
       }
    }
+   
+   m_size = 0;
+   m_firstFreeChunk = -1;
+   m_maxUsedChunk = 0;
 
    assert(m_size == 0);
 }

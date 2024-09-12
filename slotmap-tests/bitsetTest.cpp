@@ -140,3 +140,72 @@ TYPED_TEST(BitsetTest, Fill)
    }
 }
 
+
+TYPED_TEST(BitsetTest, ForEachSetBit_FromTo)
+{
+   using Bitset = typename TestFixture::BitsetType;
+
+   Bitset bitset;
+
+   size_t counter = 0;
+   bitset.ForEachSetBit(0, 0, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(0, counter);
+
+   bitset.set(32);
+
+   counter = 0;
+   bitset.ForEachSetBit(0, 0, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(0, counter);
+
+   counter = 0;
+   bitset.ForEachSetBit(0, 64, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(1, counter);
+
+   counter = 0;
+   bitset.ForEachSetBit(0, 32, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(0, counter);
+   
+   counter = 0;
+   bitset.ForEachSetBit(32, 64, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(1, counter);
+
+   counter = 0;
+   bitset.ForEachSetBit(20, 40, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(1, counter);
+
+   bitset.set(33);
+   bitset.set(63);
+
+   counter = 0;
+   bitset.ForEachSetBit(20, 40, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(2, counter);
+
+   counter = 0;
+   bitset.ForEachSetBit(0, 64, [&](size_t index)
+   {
+      ++counter;
+   });
+   ASSERT_EQ(3, counter);
+}
+

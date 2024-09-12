@@ -47,6 +47,21 @@ void* operator new(size_t size)
    return malloc(size);
 }
 
+void* operator new[](size_t size)
+{
+   if (g_memCounters.m_enabled)
+   {
+      ++g_memCounters.m_allocCount;
+      g_memCounters.m_allocBytes += size;
+      if (size > g_memCounters.m_maxAllocSize)
+      {
+         g_memCounters.m_maxAllocSize = size;
+      }
+   }
+   
+   return malloc(size);
+}
+
 void operator delete(void* ptr) noexcept
 {
    ++g_memCounters.m_freeCount;
@@ -66,7 +81,7 @@ struct BenchmarkValue
       : m_value(value)
    {
    }
-
+   
    inline operator uint64_t() const { return m_value; }
 };
 
@@ -85,16 +100,18 @@ inline bool operator==(const BenchmarkValue<Size>& a, uint64_t b)
 }
 
 
-template<typename T, typename TBitsetTraits = slotmap::FixedBitSetTraits<>>
+template<typename T, 
+         typename TBitsetTraits = slotmap::FixedBitSetTraits<>,
+         typename TStorage = slotmap::ChunkedSlotMapStorage<T, uint32_t, slotmap::DefaultMaxChunkSize, std::allocator<T>, TBitsetTraits>>
 class SlotMapContainer
 {
 public:
-   using Storage = slotmap::ChunkedSlotMapStorage<T, uint32_t, slotmap::DefaultMaxChunkSize, std::allocator<T>, TBitsetTraits>;
+   using Storage = TStorage;
    using ContainerType = slotmap::SlotMap<T, uint32_t, Storage>;
    using ValueType = T;
    using KeyType = typename ContainerType::KeyType;
    using Iterator = KeyType;
-
+   
    inline KeyType Insert(T value)
    {
       return m_slotmap.Emplace(value);
@@ -108,6 +125,11 @@ public:
    inline ValueType& Get(KeyType key)
    {
       return *m_slotmap.GetPtr(key);
+   }
+
+   inline void Reserve(size_t count)
+   {
+      m_slotmap.Reserve(count);
    }
 
    inline void Clear()
@@ -138,6 +160,11 @@ public:
 
    ContainerType m_slotmap;
 };
+
+
+template<typename T, size_t TCapacity>
+using FixedSlotMapContainer = SlotMapContainer<T, slotmap::FixedBitSetTraits<>, slotmap::FixedSlotMapStorage<T, uint32_t, TCapacity>>;
+using FixedSlotMapContainer1000000 = FixedSlotMapContainer<uint64_t, 1000000>;
 
 
 template<typename T>
@@ -176,6 +203,11 @@ public:
    inline ValueType& Get(KeyType key)
    {
       return m_stdMap[key];
+   }
+
+   inline void Reserve(size_t count)
+   {
+      m_stdMap.reserve(count);
    }
 
    inline void Clear()
@@ -232,7 +264,7 @@ public:
       slot.m_value = value;
       return key;
    }
-
+   
    inline bool Erase(KeyType key)
    {
       if ((key >= m_values.size()) || (!m_values[key].m_isAlive))
@@ -245,23 +277,40 @@ public:
       
       return true;
    }
-
+   
    inline ValueType& Get(KeyType key)
    {
       return m_values[key].m_value;
    }
+   
+   inline void Reserve(size_t cap)
+   {
+      if (m_values.size() >= cap)
+      {
+         return;
+      }
 
+      const size_t originalCap = m_values.size();
+
+      m_values.resize(cap);
+      
+      for (size_t i = m_values.size(); i > originalCap; --i)
+      {
+         m_freeList.push_back(i - 1);
+      }
+   }
+   
    inline void Clear()
    {
       m_values.clear();
       m_freeList.clear();
    }
-
+   
    inline size_t Begin()    
    {
       return 0;
    }
-
+   
    inline bool FindNext(size_t& iter)
    {
       while (iter < m_values.size())
@@ -274,7 +323,7 @@ public:
       }
       return false;
    }
-
+   
    inline void Increment(size_t& iter)
    {
       ++iter;
@@ -314,6 +363,11 @@ public:
       return *key;
    }
    
+   inline void Reserve(size_t count)
+   {
+      m_colony.reserve(count);
+   }
+
    inline void Clear() 
    {
       m_colony.clear();
@@ -357,7 +411,7 @@ public:
 #define ARGS ->Arg(100)->Arg(1000)->Arg(10000)->Arg(100000)->Arg(1000000)->Arg(10000000)
 
 #define MY_BENCHMARK(name_, traits_, traitsName_) \
-   BENCHMARK_TEMPLATE(name_, traits_)->Name(#name_ "/" #traitsName_)ARGS;
+   BENCHMARK_TEMPLATE(name_, traits_)->Name(#name_ "/" #traitsName_)ARGS
 
 
 #define BEFORE_BENCHMARK() \
@@ -371,6 +425,57 @@ public:
 
 #define ENABLE_MEM_COUNTERS() g_memCounters.m_enabled = true;
 #define DISABLE_MEM_COUNTERS() g_memCounters.m_enabled = false;
+
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TContainer>
+void SetupRandom(TContainer& container, size_t capacity, float fillRatio)
+{
+   container.Reserve(capacity);
+
+   if (fillRatio >= 1.0f)
+   {
+      for (size_t i = 0; i < capacity; ++i)
+      {
+         container.Insert(i);
+      }
+   }
+   else if (fillRatio > 0.0f)
+   {
+      std::srand(239480239);
+
+      for (size_t i = 0; i < capacity; ++i)
+      {
+         container.Insert(i);
+      }
+
+      for (auto iter = container.Begin(); container.FindNext(iter); )
+      {
+         auto next = iter;
+         container.Increment(next);
+
+         if (randf() >= fillRatio)
+         {
+            container.Erase(iter);
+         }
+
+         iter = next;
+      }
+   }
+}
+
+template<typename TContainer>
+void SetupPartiallyFilled(TContainer& container, size_t capacity, float fillRatio)
+{
+   const size_t count = capacity * fillRatio;
+
+   container.Reserve(capacity);
+
+   for (size_t i = 0; i < count; ++i)
+   {
+      container.Insert(i);
+   }
+}
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -412,10 +517,6 @@ void BM_InsertErase(benchmark::State& state)
          container.Erase(keys[i]);
       }
       
-      state.PauseTiming();
-      keys.clear();
-      state.ResumeTiming();
-      
       DISABLE_MEM_COUNTERS();
    }
 
@@ -431,12 +532,12 @@ MY_BENCHMARK(BM_InsertErase, ColonyContainer<int>, Colony);
 template<typename TContainer>
 void BM_InsertAccess(benchmark::State& state)
 {
+   const int64_t count = state.range(0);
+
    BEFORE_BENCHMARK()
 
    using KeyType = typename TContainer::KeyType;
    using ValueType = typename TContainer::ValueType;
-
-   const int64_t count = state.range(0);
 
    for (auto _ : state)
    {
@@ -465,50 +566,75 @@ MY_BENCHMARK(BM_InsertAccess, ColonyContainer<uint64_t>, Colony);
 
 //////////////////////////////////////////////////////////////////////////
 template<typename TContainer>
-void BM_Iteration(benchmark::State& state, const size_t count, const float fillRatio)
+void BM_Clear(benchmark::State& state, const size_t count, float fillRatio)
 {
-   TContainer container;
-   if (fillRatio >= 1.0f)
-   {
-      for (size_t i = 0; i < count; ++i)
-      {
-         container.Insert(i);
-      }
-   }
-   else if (fillRatio > 0.0f)
-   {
-      std::srand(239480239);
-
-      for (size_t i = 0; i < count; ++i)
-      {
-         container.Insert(i);
-      }
-      
-      for (auto iter = container.Begin(); container.FindNext(iter); container.Increment(iter))
-      {
-         if (randf() >= fillRatio)
-         {
-            container.Erase(iter);
-         }
-      }
-   }
-   
-   BEFORE_BENCHMARK()
+   auto container = std::make_unique<TContainer>();
 
    for (auto _ : state)
    {
-      ENABLE_MEM_COUNTERS();
+      state.PauseTiming();
+      
+      SetupPartiallyFilled(*container, count, fillRatio);
 
+      state.ResumeTiming();
+
+      container->Clear();
+   }
+}
+
+template<typename TContainer>
+void BM_Clear(benchmark::State& state)
+{
+   const float fillRatio = static_cast<float>(state.range(0)) / 100.0f;
+   const size_t count = static_cast<size_t>(state.range(1));
+   
+   BM_Clear<TContainer>(state, count, fillRatio);
+}
+
+#undef ARGS
+#define ARGS ->ArgsProduct({{0, 25, 50, 75, 100}, {1000000}})->Unit(benchmark::kMicrosecond)->Iterations(10)
+MY_BENCHMARK(BM_Clear, SlotMapContainer<uint64_t>, SlotMap);
+MY_BENCHMARK(BM_Clear, FixedSlotMapContainer1000000, FixedSlotMap);
+MY_BENCHMARK(BM_Clear, StdUnorderedMapContainer<uint64_t>, UnorderedMap);
+MY_BENCHMARK(BM_Clear, VectorWithFreelist<uint64_t>, Vector);
+MY_BENCHMARK(BM_Clear, ColonyContainer<uint64_t>, Colony);
+
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TContainer>
+void BM_Iteration_Only(benchmark::State& state, TContainer& container)
+{
+   for (auto _ : state)
+   {
       volatile uint64_t checksum = 0;
       for (auto iter = container.Begin(); container.FindNext(iter); container.Increment(iter))
       {
          checksum += container.Get(iter);
       }
-
-      DISABLE_MEM_COUNTERS();
    }
+}
 
-   AFTER_BENCHMARK()
+template<typename TContainer>
+void BM_Iteration_ForEachOnly(benchmark::State& state, TContainer& container)
+{
+   for (auto _ : state)
+   {
+      volatile uint64_t checksum = 0;
+      container.ForEach([&checksum](typename TContainer::KeyType id, const typename TContainer::ValueType& value)
+      {
+         checksum += value;
+      });
+   }
+}
+
+template<typename TContainer>
+void BM_Iteration(benchmark::State& state, const size_t count, const float fillRatio)
+{
+   TContainer container;
+
+   SetupRandom(container, count, fillRatio);
+   
+   BM_Iteration_Only(state, container);
 }
 
 
@@ -517,47 +643,10 @@ template<typename TContainer>
 void BM_Iteration_ForEach(benchmark::State& state, const size_t count, const float fillRatio)
 {
    TContainer container;
-   if (fillRatio >= 1.0f)
-   {
-      for (size_t i = 0; i < count; ++i)
-      {
-         container.Insert(i);
-      }
-   }
-   else if (fillRatio > 0.0f)
-   {
-      std::srand(239480239);
 
-      for (size_t i = 0; i < count; ++i)
-      {
-         container.Insert(i);
-      }
+   SetupRandom(container, count, fillRatio);
       
-      for (auto iter = container.Begin(); container.FindNext(iter); container.Increment(iter))
-      {
-         if (randf() >= fillRatio)
-         {
-            container.Erase(iter);
-         }
-      }
-   }
-   
-   BEFORE_BENCHMARK()
-
-   for (auto _ : state)
-   {
-      ENABLE_MEM_COUNTERS();
-
-      volatile uint64_t checksum = 0;
-      container.ForEach([&checksum](typename TContainer::KeyType id, const typename TContainer::ValueType& value)
-      {
-         checksum += value;
-      });
-
-      DISABLE_MEM_COUNTERS();
-   }
-
-   AFTER_BENCHMARK()
+   BM_Iteration_ForEachOnly(state, container);
 }
 
 
@@ -580,8 +669,36 @@ void BM_Iteration_ForEach(benchmark::State& state)
    BM_Iteration_ForEach<TContainer>(state, count, fillRatio);
 }
 
+template<typename TContainer>
+void BM_Iteration_PartiallyFilled(benchmark::State& state)
+{
+   const float fillRatio = static_cast<float>(state.range(0)) / 100.0f;
+   const size_t capacity = static_cast<size_t>(state.range(1));
+   const size_t count = capacity * fillRatio;
+
+   auto container = std::make_unique<TContainer>();
+
+   SetupPartiallyFilled(*container, capacity, fillRatio);
+
+   BM_Iteration_Only(state, *container);
+}
+
+template<typename TContainer>
+void BM_Iteration_PartiallyFilledForEach(benchmark::State& state)
+{
+   const float fillRatio = static_cast<float>(state.range(0)) / 100.0f;
+   const size_t capacity = static_cast<size_t>(state.range(1));
+   const size_t count = capacity * fillRatio;
+
+   auto container = std::make_unique<TContainer>();
+   
+   SetupPartiallyFilled(*container, capacity, fillRatio);
+   
+   BM_Iteration_ForEachOnly(state, *container);
+}
+
 #undef ARGS
-#define ARGS ->ArgsProduct({{0, 25, 50, 75, 100}, {1000000}})
+#define ARGS ->ArgsProduct({{0, 25, 50, 75, 100}, {1000000}})->Unit(benchmark::kMicrosecond)
 MY_BENCHMARK(BM_Iteration, SlotMapContainer<BenchmarkValue<>>, SlotMap);
 MY_BENCHMARK(BM_Iteration_ForEach, SlotMapContainer<BenchmarkValue<>>, SlotMap);
 using SlotMapContainerStdBitset = SlotMapContainer<BenchmarkValue<>, slotmap::StdBitSetTraits>;
@@ -589,6 +706,15 @@ MY_BENCHMARK(BM_Iteration, SlotMapContainerStdBitset, SlotMapStdBitset);
 MY_BENCHMARK(BM_Iteration, StdUnorderedMapContainer<BenchmarkValue<>>, UnorderedMap);
 MY_BENCHMARK(BM_Iteration, VectorWithFreelist<BenchmarkValue<>>, Vector);
 MY_BENCHMARK(BM_Iteration, ColonyContainer<BenchmarkValue<>>, Colony);
+
+MY_BENCHMARK(BM_Iteration_PartiallyFilled, SlotMapContainer<BenchmarkValue<>>, SlotMap);
+MY_BENCHMARK(BM_Iteration_PartiallyFilledForEach, SlotMapContainer<BenchmarkValue<>>, SlotMap);
+MY_BENCHMARK(BM_Iteration_PartiallyFilled, SlotMapContainerStdBitset, SlotMapStdBitset);
+MY_BENCHMARK(BM_Iteration_PartiallyFilled, FixedSlotMapContainer1000000, FixedSlotMap);
+MY_BENCHMARK(BM_Iteration_PartiallyFilledForEach, FixedSlotMapContainer1000000, FixedSlotMap);
+MY_BENCHMARK(BM_Iteration_PartiallyFilled, StdUnorderedMapContainer<BenchmarkValue<>>, UnorderedMap);
+MY_BENCHMARK(BM_Iteration_PartiallyFilled, VectorWithFreelist<BenchmarkValue<>>, Vector);
+MY_BENCHMARK(BM_Iteration_PartiallyFilled, ColonyContainer<BenchmarkValue<>>, Colony);
 
 
 BENCHMARK_MAIN();

@@ -47,15 +47,7 @@ public:
    static_assert(std::is_unsigned_v<TWord>);
 
    static constexpr size_t StaticSize = TSize;
-
-   class Iterator
-   {
-   public:
-   private:
-      size_t m_index = 0;
-      TWord* m_word = nullptr;
-   };
-
+   
    FixedBitset();
    FixedBitset(const FixedBitset& other);
    FixedBitset(FixedBitset&& other);
@@ -74,6 +66,9 @@ public:
 
    template<typename TFunc>
    void ForEachSetBit(TFunc func) const;
+
+   template<typename TFunc>
+   void ForEachSetBit(size_t from, size_t to, TFunc func) const;
    
    void Clear();
    
@@ -108,6 +103,18 @@ struct FixedBitSetTraits
    {
       return bitset.FindNextBitSet(start);
    }
+
+   template<size_t TSize, typename TFunc>
+   static inline void ForEachSetBit(const BitsetType<TSize>& bitset, TFunc func)
+   {
+      bitset.ForEachSetBit(func);
+   }
+
+   template<size_t TSize, typename TFunc>
+   static inline void ForEachSetBit(size_t from, size_t to, const BitsetType<TSize>& bitset, TFunc func)
+   {
+      bitset.ForEachSetBit(from, to, func);
+   }
 };
 
 
@@ -127,6 +134,30 @@ struct StdBitSetTraits
          }
       }
       return TSize;
+   }
+
+   template<size_t TSize, typename TFunc>
+   static inline void ForEachSetBit(const BitsetType<TSize>& bitset, TFunc func)
+   {
+      for (size_t i = 0; i < TSize; ++i)
+      {
+         if (bitset.test(i))
+         {
+            func(i);
+         }
+      }
+   }
+
+   template<size_t TSize, typename TFunc>
+   static inline void ForEachSetBit(size_t from, size_t to, const BitsetType<TSize>& bitset, TFunc func)
+   {
+      for (size_t i = from; i < to; ++i)
+      {
+         if (bitset.test(i))
+         {
+            func(i);
+         }
+      }
    }
 };
 
@@ -244,6 +275,70 @@ void FixedBitset<TSize, TWord>::ForEachSetBit(TFunc func) const
       {
          const size_t bitIndex = CountTrailingZeros(word);
          func(wordIndex * BitsPerWord + bitIndex);
+         word &= ~(static_cast<TWord>(1u) << bitIndex);
+      }
+   }
+}
+
+
+template<size_t TSize, typename TWord>
+template<typename TFunc>
+void FixedBitset<TSize, TWord>::ForEachSetBit(size_t from, size_t to, TFunc func) const
+{
+   if (from >= to)
+   {
+      return;
+   }
+   
+   const size_t fromWordIndex = from / BitsPerWord;
+   const size_t fromBitIndex = from & BitIndexMask;
+   const size_t toWordIndex = to / BitsPerWord;
+   const size_t toBitIndex = to & BitIndexMask;
+
+   if (fromWordIndex == toWordIndex)
+   {
+      TWord word = m_words[fromWordIndex] & ~((static_cast<TWord>(1u) << fromBitIndex) - 1);
+      while (word != static_cast<TWord>(0))
+      {
+         const size_t bitIndex = CountTrailingZeros(word);
+         if (bitIndex >= toBitIndex)
+         {
+            return;
+         }
+         func(fromWordIndex * BitsPerWord + bitIndex);
+         word &= ~(static_cast<TWord>(1u) << bitIndex);
+      }
+   }
+   else
+   {
+      TWord word = m_words[fromWordIndex] & ~((static_cast<TWord>(1u) << fromBitIndex) - 1);
+      while (word != static_cast<TWord>(0))
+      {
+         const size_t bitIndex = CountTrailingZeros(word);
+         func(fromWordIndex * BitsPerWord + bitIndex);
+         word &= ~(static_cast<TWord>(1u) << bitIndex);
+      }
+      
+      for (size_t wordIndex = fromWordIndex + 1; wordIndex < toWordIndex; ++wordIndex)
+      {
+         word = m_words[wordIndex];
+         while (word != static_cast<TWord>(0))
+         {
+            const size_t bitIndex = CountTrailingZeros(word);
+            func(wordIndex * BitsPerWord + bitIndex);
+            word &= ~(static_cast<TWord>(1u) << bitIndex);
+         }
+      }
+      
+      word = m_words[toWordIndex];
+      while (word != static_cast<TWord>(0))
+      {
+         const size_t bitIndex = CountTrailingZeros(word);
+         if (bitIndex >= toBitIndex)
+         {
+            return;
+         }
+         func(toWordIndex * BitsPerWord + bitIndex);
          word &= ~(static_cast<TWord>(1u) << bitIndex);
       }
    }

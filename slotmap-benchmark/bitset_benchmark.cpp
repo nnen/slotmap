@@ -16,6 +16,11 @@ struct StdBitsetTraits
    static constexpr size_t Size = BitsetSize;
    using BitsetType = std::bitset<BitsetSize>;
 
+   static inline void Clear(BitsetType& bitset)
+   {
+      bitset.reset();
+   }
+
    static inline void Set(BitsetType& bitset, size_t index, bool value)
    {
       bitset.set(index, value);
@@ -39,6 +44,11 @@ struct FixedBitsetTraits
    static constexpr size_t Size = BitsetSize;
    using BitsetType = slotmap::FixedBitset<BitsetSize>;
 
+   static inline void Clear(BitsetType& bitset)
+   {
+      bitset.Clear();
+   }
+
    static inline void Set(BitsetType& bitset, size_t index, bool value)
    {
       bitset.Set(index, value);
@@ -54,6 +64,37 @@ struct FixedBitsetTraits
       return bitset.FindNextBitSet(start);
    }
 };
+
+
+template<typename Traits>
+size_t SetRandomBits(typename Traits::BitsetType& bitset, float fillRatio)
+{
+   Traits::Clear(bitset);
+
+   size_t count = 0;
+
+   if (fillRatio > 0.0f)
+   {
+      for (size_t i = 0; i < Traits::Size; ++i)
+      {
+         if (randf() < fillRatio)
+         {
+            Traits::Set(bitset, i, true);
+            ++count;
+         }
+      }
+   }
+   else if (fillRatio >= 1.0f)
+   {
+      for (size_t i = 0; i < Traits::Size; ++i)
+      {
+         Traits::Set(bitset, i, true);
+      }
+      count = Traits::Size;
+   }
+
+   return count;
+}
 
 
 template<typename Traits>
@@ -74,6 +115,25 @@ void BM_Bitset_Set(benchmark::State& state)
 
 
 template<typename Traits>
+void BM_Bitset_Clear(benchmark::State& state)
+{
+   using BitsetType = typename Traits::BitsetType;
+   
+   BitsetType bitset;
+   
+   for (auto _ : state)
+   {
+      state.PauseTiming();
+      std::srand(239480239);
+      SetRandomBits<Traits>(bitset, 0.5f);
+      state.ResumeTiming();
+      
+      Traits::Clear(bitset);
+   }
+}
+
+
+template<typename Traits>
 void BM_Bitset_Iteration(benchmark::State& state, float fillRatio)
 {
    using BitsetType = typename Traits::BitsetType;
@@ -81,26 +141,7 @@ void BM_Bitset_Iteration(benchmark::State& state, float fillRatio)
    std::srand(239480239);
 
    BitsetType bitset;
-   size_t count = 0;
-   if (fillRatio > 0.0f)
-   {
-      for (size_t i = 0; i < Traits::Size; ++i)
-      {
-         if (randf() < fillRatio)
-         {
-            Traits::Set(bitset, i, true);
-            ++count;
-         }
-      }
-   }
-   else if (fillRatio >= 1.0f)
-   {
-      for (size_t i = 0; i < Traits::Size; ++i)
-      {
-         Traits::Set(bitset, i, true);
-      }
-      count = Traits::Size;
-   }
+   size_t count = SetRandomBits<Traits>(bitset, fillRatio);
    
    for (auto _ : state)
    {
@@ -121,26 +162,7 @@ void BM_Bitset_Iteration_ForEach(benchmark::State& state, float fillRatio)
    std::srand(239480239);
 
    BitsetType bitset;
-   size_t count = 0;
-   if (fillRatio > 0.0f)
-   {
-      for (size_t i = 0; i < Traits::Size; ++i)
-      {
-         if (randf() < fillRatio)
-         {
-            Traits::Set(bitset, i, true);
-            ++count;
-         }
-      }
-   }
-   else if (fillRatio >= 1.0f)
-   {
-      for (size_t i = 0; i < Traits::Size; ++i)
-      {
-         Traits::Set(bitset, i, true);
-      }
-      count = Traits::Size;
-   }
+   size_t count = SetRandomBits<Traits>(bitset, fillRatio);
    
    for (auto _ : state)
    {
@@ -171,6 +193,9 @@ void BM_Bitset_Iteration_ForEach(benchmark::State& state)
 
 BENCHMARK_TEMPLATE(BM_Bitset_Set, StdBitsetTraits<1000000>);
 BENCHMARK_TEMPLATE(BM_Bitset_Set, FixedBitsetTraits<1000000>);
+
+BENCHMARK_TEMPLATE(BM_Bitset_Clear, StdBitsetTraits<1000000>)->Iterations(100);
+BENCHMARK_TEMPLATE(BM_Bitset_Clear, FixedBitsetTraits<1000000>)->Iterations(100);
 
 BENCHMARK_TEMPLATE(BM_Bitset_Iteration, StdBitsetTraits<1000000>)
    ->DenseRange(0, 100, 10);

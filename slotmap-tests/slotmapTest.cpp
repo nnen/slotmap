@@ -826,6 +826,20 @@ TYPED_TEST(SlotMapTest, Clear)
    {
       ASSERT_FALSE(map.Erase(key));
    }
+
+   size_t count = 0;
+   map.ForEachSlot([&](KeyType key, const ValueType& value) {
+      ++count;
+   });
+   ASSERT_EQ(0, count);
+
+   map.Emplace(123);
+
+   count = 0;
+   map.ForEachSlot([&](KeyType key, const ValueType& value) {
+      ++count;
+   });
+   ASSERT_EQ(1, count);
 }
 
 
