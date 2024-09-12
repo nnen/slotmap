@@ -25,6 +25,10 @@ The slotmap implementation is in the `slotmap/slotmap.h` and `slotmap/slotmap.in
 
 There is a Google Benchmark based benchmark in the `slotmap-benchmarks` directory.
 
+Below are the results of selected benchmarks. They were ran on Intel Core
+i9-10850K 3.60GHz CPU with 32GB RAM. The benchamrk suite was compiled with
+Clang.
+
 ### BM_Bitset_Iteration
 
 Currently, the slotmap implementation uses a bitset to manage the alive/dead
