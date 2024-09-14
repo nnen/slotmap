@@ -828,7 +828,7 @@ TYPED_TEST(SlotMapTest, Clear)
    }
 
    size_t count = 0;
-   map.ForEachSlot([&](KeyType key, const ValueType& value) {
+   map.ForEach([&](KeyType key, const ValueType& value) {
       ++count;
    });
    ASSERT_EQ(0, count);
@@ -836,7 +836,7 @@ TYPED_TEST(SlotMapTest, Clear)
    map.Emplace(123);
 
    count = 0;
-   map.ForEachSlot([&](KeyType key, const ValueType& value) {
+   map.ForEach([&](KeyType key, const ValueType& value) {
       ++count;
    });
    ASSERT_EQ(1, count);

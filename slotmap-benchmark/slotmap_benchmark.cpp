@@ -155,7 +155,7 @@ public:
    template<typename TFunc>
    inline void ForEach(TFunc func)
    {
-      m_slotmap.ForEachSlot(func);
+      m_slotmap.ForEach(func);
    }
 
    ContainerType m_slotmap;

@@ -38,6 +38,10 @@ namespace slotmap {
 
 
 //////////////////////////////////////////////////////////////////////////
+/**
+ * Returns the number of bits required to represent the given number of
+ * elements.
+ */
 constexpr int GetIndexBitSize(int arraySize)
 {
    return ((arraySize <= 2) ? 1 : 1 + GetIndexBitSize(arraySize >> 1));
@@ -130,6 +134,7 @@ template<
    void Swap(FixedSlotMapStorage& other);
    void Clear();
 
+private:
    SizeType m_size = 0;
    IndexType m_firstFreeSlot = -1;
    IndexType m_maxUsedSlot = 0;
@@ -334,6 +339,7 @@ struct ChunkedSlotMapStorage
    using ChunkAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk>;
    using ChunkPtrAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk*>;
 
+private:
    SizeType m_size = 0;
    IndexType m_firstFreeChunk = -1;
    SizeType m_maxUsedChunk = 0;
@@ -353,34 +359,159 @@ public:
 
    static constexpr KeyType InvalidKey = TStorage::InvalidKey;
 
+   /**
+    * Default constructor.
+    * 
+    * Constructs empty slot map.
+    */
    SlotMap() = default;
+   /**
+    * Copy constructor.
+    * 
+    * Copies all elements from `other` to the slotmap. The copied elements will
+    * have the same keys.
+    */
    inline SlotMap(const SlotMap& other) : m_storage(other.m_storage) {}
+   /**
+    * Move constructor.
+    *
+    * Constructs the slotmap by moving the contents of `other` to the new slotmap.
+    */
    inline SlotMap(SlotMap&& other) : m_storage(std::move(other.m_storage)) {}
    
+   /**
+    * Copy assignment operator.
+    * 
+    * The copied elements will have the same keys.
+    */
    inline SlotMap& operator=(const SlotMap& other) { m_storage = other.m_storage; return *this; }
+   /**
+    * Move assignment operator.
+    */
    inline SlotMap& operator=(SlotMap&& other) { m_storage = std::move(other.m_storage); return *this; }
    
+   //! Returns the number of elements that the slotmap holds.
    inline SizeType Size() const { return m_storage.Size(); }
+   //! Returns the number of elements that can be held in the currently allocated storage.
    inline SizeType Capacity() const { return m_storage.Capacity(); }
+   //! Returns the number of elements that can potentially be held in the slotmap.
+   /**
+    * Returns the number of elements that can potentially be held in the slotmap.
+    * 
+    * The maximum capacity depends on the key type, the storage
+    * type and the value type.
+    */
    inline static constexpr SizeType MaxCapacity() { return TStorage::MaxCapacity(); }
 
+   /**
+    * If possible, increases the capacity of the slotmap to at least `capacity`
+    * and returns `true`, otherwise returns `false`.
+    *
+    * If the function returns `false`, the capacity remains unchanged.
+    *
+    * In either case, all existing keys remain valid. The \ref MaxCapacity()
+    * function can be used to determine the maximum capacity that can be
+    * reserved in a slotmap.
+    *
+    * \params capacity New capacity of the slotmap, in number of elements.
+    */
    inline bool Reserve(SizeType capacity) { return m_storage.Reserve(capacity); }
 
+   /**
+    * Constructs a new element in a free slot and returns the key associated with it.
+    *
+    * Has O(1) time complexity.
+    *
+    * \params args The arguments to be forwarded to the constructor of the element.
+    */
    template<typename... TArgs>
    TKey Emplace(TArgs&&... args);
 
+   /**
+    * Erases the element with the given key.
+    *
+    * If the specified key is valid, erases the associated element and returns
+    * `true`. Otherwise, returns `false`.
+    *
+    * After this call, \ref GetPtr() returns nullptr for the given key.
+    *
+    * Has O(1) time complexity (worst case).
+    */
    inline bool Erase(TKey key) { return m_storage.FreeSlot(key); }
+   /**
+    * Exchanges the contents of the slotmap with those of `other`.
+    *
+    * Depending on the storage implementation, this operation may or may not
+    * move elements (the \ref FixedSlotMapStorage moves elements, the 
+    * \ref ChunkedSlotMapStorage does not).
+    *
+    * The time complexity depends on the storage implementation.
+    */
    inline void Swap(SlotMap& other) { m_storage.Swap(other.m_storage); }
+   /**
+    * Erases all elements from the slotmap.
+    *
+    * After this call, \ref Size() returns zero. Invalidates all keys.
+    *
+    * Leaves the capacity unchanged. No memory is deallocated.
+    *
+    * Has O(n) time complexity where n is the max. number of elements that the
+    * slotmap contained since construction or last \ref Clear() call (i.e. not
+    * the capacity).
+    */
    inline void Clear() { m_storage.Clear(); }
 
+   /**
+    * Returns a pointer to the element associated with the given key.
+    *
+    * If the key is invalid, returns `nullptr`.
+    *
+    * Has O(1) time complexity (worst case).
+    */
    inline TValue* GetPtr(TKey key) { return m_storage.GetPtr(key); }
+   /**
+    * Returns a pointer to the element associated with the given key.
+    *
+    * If the key is invalid, returns `nullptr`.
+    *
+    * Has O(1) time complexity (worst case).
+    */
    inline const TValue* GetPtr(TKey key) const { return m_storage.GetPtr(key); }
-
+   
+   /**
+    * Starting from the given key (which may not be valid), find the next valid
+    * key and return it.
+    *
+    * This function is meant to be used together with \ref IncrementKey() to
+    * iterate over all valid keys. Example:
+    *
+    * \code
+    * SlotMap<int> slotmap;
+    * for (SlotMap<int>::KeyType key = 0; slotmap.FindNextKey(key); key = slotmap.IncrementKey(key))
+    * {
+    *   // Do something with the key
+    * }
+    * \endcode
+    *
+    * \note If performance is critical, consider using \ref ForEach() instead.
+    */
    inline bool FindNextKey(TKey& key) const { return m_storage.FindNextKey(key); }
+   /**
+    * Increments the key to the next slot, valid or not.
+    *
+    * This function is meant to be used together with \ref FindNextKey() to
+    * iterate over all valid keys.
+    */
    inline TKey IncrementKey(TKey key) const { return m_storage.IncrementKey(key); }
 
+   /**
+    * Applies the given function object to each valid element in the slotmap.
+    *
+    * \param func The function object to be applied every element. The signature
+    *             of the function should be equivalent to `void func(TKey key, TValue& value)`.
+    */
    template<typename TFunc>
-   inline void ForEachSlot(TFunc func) const { m_storage.ForEachSlot(func); }
+   inline void ForEach(TFunc func) const { m_storage.ForEachSlot(func); }
 
 private:
    TStorage m_storage;

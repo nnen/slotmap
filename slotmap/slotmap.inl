@@ -400,14 +400,15 @@ template<
    typename TAllocator,
    typename TBitsetTraits>
 ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::ChunkedSlotMapStorage(ChunkedSlotMapStorage&& other)
-   : m_size(other.m_size)
-   , m_firstFreeChunk(other.m_firstFreeChunk)
-   , m_maxUsedChunk(other.m_maxUsedChunk)
-   , m_chunks(std::move(other.m_chunks))
+//   : m_size(other.m_size)
+//   , m_firstFreeChunk(other.m_firstFreeChunk)
+//   , m_maxUsedChunk(other.m_maxUsedChunk)
+//   , m_chunks(std::move(other.m_chunks))
 {
-   other.m_size = 0;
-   other.m_firstFreeChunk = -1;
-   other.m_maxUsedChunk = 0;
+   //other.m_size = 0;
+   //other.m_firstFreeChunk = -1;
+   //other.m_maxUsedChunk = 0;
+   *this = std::move(other);
 }
 
 
