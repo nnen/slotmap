@@ -3,19 +3,27 @@
 [![Build Status](https://github.com/nnen/slotmap/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/nnen/slotmap/actions/)
 ![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-This is a C++ slotmap implementation. For a detailed explanation of what a
-slotmap is, see:
+This is a C++ slotmap implementation.
+
+ * Associative container. Keys are unsigned integers and are automatically
+   assigned to elements on insertion.
+ * Insertions and deletions of other elements do not invalidate the keys.
+ * Pointers and references to elements are stable. The elements are never moved
+   in memory.
+ * Random access has *O(1)* time complexity in the worst case.
+ * Insertions and deletions have *O(1)* time complexity in the worst case.
+ * Fast iteration over valid elements (see benchmarks).
+ * Supports both dynamically and statically allocated storage.
+ * Supports keys of any unsigned integer type of at least 16 bits.
+
+For more information about slotmap as a concept, see:
 
  * [Allan Deutsch (2017). C++ Now 2017: "The Slot Map Data Structure".](https://youtu.be/SHaAR7XPtNU?si=6clk4jhFL_sk50lY)
  * [Sean Middleditch (2013). Data Structures for Game Developers: The Slot Map.](https://web.archive.org/web/20180121142549/http://seanmiddleditch.com/data-structures-for-game-developers-the-slot-map/)
 
 This implementation is work in progress. Known features missing are:
 
- * Copy assignment operator.
  * STL-style iterators.
- * Currently using [`std::bitset`](https://en.cppreference.com/w/cpp/utility/bitset) 
-   for alive bits, which doesn't support efficient iteration over set bits. Custom 
-   implementation which would use 'leading zeros' or 'trailing zeros' instructions is planned.
 
 ## Source
 
@@ -70,29 +78,77 @@ to decode the slotmap for each step of the iteration.
 
 ### BM_InsertErase
 
-| Elements |    vector |  unordered\_map |   slotmap |    colony |
-| -------: | --------: | --------------: | --------: | --------: |
-|      100 |      2313 |           12912 |      3577 |      1793 |
-|     1000 |     11883 |          116297 |     13938 |     16482 |
-|    10000 |    111106 |         1354761 |    124286 |    167610 |
-|   100000 |   1508250 |        16829002 |   1397777 |   1702604 |
-|  1000000 |  18741405 |       352602200 |  13472431 |  17606432 |
-| 10000000 | 203556933 |      5373849100 | 132865175 | 179067467 |
+#### Pseudocode
+
+    Insert N elements into the container
+    Clear the container
+    Insert N elements into the container
+    For each inserted key:
+       Erase the key from the slotmap
+
+#### Results
+
+The times are in nanoseconds.
+
+| Elements |    vector | unordered\_map |   slotmap |    colony |
+| -------: | --------: | -------------: | --------: | --------: |
+|      100 |      2202 |          13075 |      1886 |      1678 |
+|     1000 |     11898 |         117732 |     10422 |     16504 |
+|    10000 |    132910 |        1378636 |     96990 |    171081 |
+|   100000 |   1663162 |       16605540 |   1077619 |   1762114 |
+|  1000000 |  19428353 |      363784350 |  10058595 |  18165161 |
+| 10000000 | 222740967 |     5514846000 | 101167150 | 180534925 |
+
+Note the graph below uses logarithmic scale for both x and y axis. In this case
+that means that `unordered_map` is around an order of magniture worse than
+everything else.
 
 ![Graph comparing the speed of insertion and erasure for different implementation of slotmap](slotmap-benchmark/results/bm_inserterase_cpu.png)
 
 ### BM_Iteration
 
-| % of bits set |  vector |  unordered\_map | slotmap/std::bitset | slotmap | slotmap/foreach |  colony |
-| ------------: | ------: | --------------: | ------------------: | ------: | --------------: | ------: |
-| 0             |   0.236 |           0.779 |               0.237 |   0.235 |           0.235 |   0.236 |
-| 25            | 4301083 |        13949860 |             4386942 | 2838624 |         1819588 | 1371352 |
-| 50            | 5299380 |        24772943 |             5483084 | 4181928 |         2637951 | 2328349 |
-| 75            | 4367373 |        34134640 |             4925899 | 5232540 |         3044984 | 2742511 |
-| 100           | 3178315 |        43031847 |             4207817 | 6577767 |         3156624 | 2915600 |
+To prepare the test data, this benchmark fills a container with 1000000 elements
+and then randomly selects a set percentage of them and removes them. The intent
+is to create "holes" in what is essentially a sparse array.
+
+The measured part of the benchmark then simply iterates over all elements in the
+slotmap and adds them up using a checksum variable.
+
+The compared collections are:
+
+* `vector` - a simple `std::vector` with boolean alive flags and a free list
+* `unordered_map` - `std::unordered_map` with a counter to automatically assign IDs
+* `slotmap/std::bitset` - `SlotMap`, but using `std::bitset` instead of the default `FixedBitSet`
+* `slotmap` - default `SlotMap` using dynamically allocated chunked storage
+* `slotmap/foreach` - same as `slotmap`, but using the `ForEach()` function
+* `colony` - `plf::colony` (https://github.com/mattreecebentley/plf_colony)
+
+#### Results
+
+The times are in microseconds.
+
+| % of slots used |  vector |  unordered\_map | slotmap/std::bitset | slotmap | slotmap/foreach |  colony |
+| --------------: | ------: | --------------: | ------------------: | ------: | --------------: | ------: |
+| 0               |    3147 |           0.000 |               0.000 |   0.000 |           0.000 |  0.000  |
+| 25              |    4256 |           12266 |                4324 |    3170 |            1661 |   1455  |
+| 50              |    5328 |           20436 |                5480 |    4367 |            2654 |   2429  |
+| 75              |    4231 |           26320 |                5035 |    5453 |            3167 |   2818  |
+| 100             |    3271 |           31041 |                4256 |    6630 |            3249 |   3090  |
 
 ![Graph comparing the speed of iteration for different implementation of slotmap](slotmap-benchmark/results/bm_iteration.png)
 ![Graph comparing the speed of iteration for different implementation of slotmap without std::unordered_map](slotmap-benchmark/results/bm_iteration_no_map.png)
+
+### BM_Clear
+
+The times are in microseconds.
+
+| % of slots used |  vector |  unordered\_map | slotmap |   fixed_slotmap |  colony |
+| --------------: | ------: | --------------: | ------: | --------------: | ------: |
+| 0               |    1.12 |           0.170 |   0.180 |            5.08 |   0.240 |
+| 25              |    1.06 |            9048 |   0.430 |            5.12 |   0.500 |
+| 50              |    1.37 |           19369 |   0.560 |            4.11 |   0.660 |
+| 75              |    1.22 |           32524 |   0.530 |            3.54 |   0.830 |
+| 100             |    1.48 |           49599 |   0.670 |            3.07 |   0.910 |
 
 ## Tests
 
