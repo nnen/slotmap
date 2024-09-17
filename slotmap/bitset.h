@@ -96,7 +96,7 @@ public:
    inline void reset(size_t index) { Unset(index); }
    inline void reset() { Clear(); }
    inline void flip(size_t index) { Flip(index); }
-   inline void flip() { Flip()}
+   inline void flip() { Flip(); }
 
 private:
    TWord m_words[NumWords];
