@@ -26,6 +26,7 @@
 
 #include <type_traits>
 #include <climits>
+#include <limits>
 #include <vector>
 #include <bitset>
 #include <memory>

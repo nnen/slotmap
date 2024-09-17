@@ -647,6 +647,7 @@ template<
    typename TBitsetTraits>
 void ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits>::InitializeChunk(Chunk* chunk)
 {
+   chunk->m_liveBits.reset();
    for (size_t i = 0; i < ChunkSlots - 1; ++i)
    {
       chunk->m_slots[i].m_nextFreeSlot = i + 1;
