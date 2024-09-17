@@ -354,12 +354,58 @@ public:
       if (values.size() != visitedKeys.size())
       {
          return ::testing::AssertionFailure() <<
-            "Counter " << visitedKeys.size() << " does not match values size " << values.size();
+            "Expected to iterate over " << values.size() << " keys, but iterated over " << visitedKeys.size();
       }
 
       return ::testing::AssertionSuccess();
    }
    
+   ::testing::AssertionResult CheckIteration_Iterator()
+   {
+      return CheckIteration_Iterator(m_map1, m_items);
+   }
+   
+   ::testing::AssertionResult CheckIteration_Iterator(const MapType& map, const Pairs& values)
+   {
+      Keys visitedKeys;
+      size_t iteration = 0;
+
+      for (auto it = map.Begin(); it != map.End(); ++it, ++iteration)
+      {
+         const ValueType* ptr = it.GetPtr();
+         if (ptr == nullptr)
+         {
+            return ::testing::AssertionFailure() << "Key " << it.GetKey() << " not found (iteration " << iteration << ")";
+         }
+         
+         if (visitedKeys.count(it.GetKey()) != 0)
+         {
+            return ::testing::AssertionFailure() << "Key " << it.GetKey() << " already visited (iteration " << iteration << ")";
+         }
+         visitedKeys.insert(it.GetKey());
+
+         auto it2 = values.find(it.GetKey());
+         if (it2 == values.end())
+         {
+            return ::testing::AssertionFailure() << "Key " << it.GetKey() << " not found in expected values (iteration " << iteration << ")";
+         }
+
+         if (*ptr != it2->second)
+         {
+            return ::testing::AssertionFailure() <<
+               "Value " << *ptr << " does not match expected value " << it2->second << " (iteration " << iteration << ")";
+         }
+      }
+      
+      if (values.size() != visitedKeys.size())
+      {
+         return ::testing::AssertionFailure() <<
+            "Expected to iterate over " << values.size() << " keys, but iterated over " << visitedKeys.size();
+      }
+      
+      return ::testing::AssertionSuccess();
+   }
+
    ::testing::AssertionResult CheckValues()
    {
       return CheckValues(m_map1, m_items);
@@ -463,7 +509,8 @@ using SlotMapTestTypes = ::testing::Types<
    SlotMapTestTraits<SlotMap<TestValueType>, 10000>,
    SlotMapTestTraits<SlotMap<TestValueType>, 1000000>,
    SlotMapTestTraits<SlotMap<TestValueType>, 14614082>,
-   SlotMapTestTraits<SlotMap<TestValueType, uint64_t>, 1000000>>;
+   SlotMapTestTraits<SlotMap<TestValueType, uint64_t>, 1000000>
+>;
 TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes, SlotMapTestNameGenerator);
 
 
@@ -861,6 +908,19 @@ TYPED_TEST(SlotMapTest, Iteration)
 
    ASSERT_TRUE(TestFixture::SetUpTestData(TestFixture::MaxSize));
    ASSERT_TRUE(TestFixture::CheckIteration());
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, Iteration_Iterator)
+{
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+   using Traits = typename TestFixture::Traits;
+
+   ASSERT_TRUE(TestFixture::SetUpTestData(TestFixture::MaxSize));
+   ASSERT_TRUE(TestFixture::CheckIteration_Iterator());
 }
 
 

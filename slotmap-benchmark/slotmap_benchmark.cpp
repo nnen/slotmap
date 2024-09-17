@@ -602,6 +602,40 @@ MY_BENCHMARK(BM_Clear, ColonyContainer<uint64_t>, Colony);
 
 //////////////////////////////////////////////////////////////////////////
 template<typename TContainer>
+void BM_Iteration_IteratorOnly(benchmark::State& state, TContainer& container)
+{
+   for (auto _ : state)
+   {
+      volatile uint64_t checksum = 0;
+      for (auto it = container.Begin(); it != container.End(); ++it)
+      {
+         checksum += *it.GetPtr();
+      }
+   }
+}
+
+template<typename TContainer>
+void BM_Iteration_Iterator(benchmark::State& state, const size_t count, const float fillRatio)
+{
+   auto container = std::make_unique<TContainer>();
+
+   SetupRandom(*container, count, fillRatio);
+      
+   BM_Iteration_ForEachOnly(state, *container);
+}
+
+template<typename TContainer>
+void BM_Iteration_Iterator(benchmark::State& state)
+{
+   const float fillRatio = static_cast<float>(state.range(0)) / 100.0f;
+   const size_t count = static_cast<size_t>(state.range(1));
+
+   BM_Iteration_Iterator<TContainer>(state, count, fillRatio);
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TContainer>
 void BM_Iteration_Only(benchmark::State& state, TContainer& container)
 {
    for (auto _ : state)
@@ -615,42 +649,15 @@ void BM_Iteration_Only(benchmark::State& state, TContainer& container)
 }
 
 template<typename TContainer>
-void BM_Iteration_ForEachOnly(benchmark::State& state, TContainer& container)
-{
-   for (auto _ : state)
-   {
-      volatile uint64_t checksum = 0;
-      container.ForEach([&checksum](typename TContainer::KeyType id, const typename TContainer::ValueType& value)
-      {
-         checksum += value;
-      });
-   }
-}
-
-template<typename TContainer>
 void BM_Iteration(benchmark::State& state, const size_t count, const float fillRatio)
 {
-   TContainer container;
+   auto container = std::make_unique<TContainer>();
 
-   SetupRandom(container, count, fillRatio);
+   SetupRandom(*container, count, fillRatio);
    
-   BM_Iteration_Only(state, container);
+   BM_Iteration_Only(state, *container);
 }
 
-
-//////////////////////////////////////////////////////////////////////////
-template<typename TContainer>
-void BM_Iteration_ForEach(benchmark::State& state, const size_t count, const float fillRatio)
-{
-   TContainer container;
-
-   SetupRandom(container, count, fillRatio);
-      
-   BM_Iteration_ForEachOnly(state, container);
-}
-
-
-//////////////////////////////////////////////////////////////////////////
 template<typename TContainer>
 void BM_Iteration(benchmark::State& state)
 {
@@ -658,15 +665,6 @@ void BM_Iteration(benchmark::State& state)
    const size_t count = static_cast<size_t>(state.range(1));
 
    BM_Iteration<TContainer>(state, count, fillRatio);
-}
-
-template<typename TContainer>
-void BM_Iteration_ForEach(benchmark::State& state)
-{
-   const float fillRatio = static_cast<float>(state.range(0)) / 100.0f;
-   const size_t count = static_cast<size_t>(state.range(1));
-
-   BM_Iteration_ForEach<TContainer>(state, count, fillRatio);
 }
 
 template<typename TContainer>
@@ -697,12 +695,51 @@ void BM_Iteration_PartiallyFilledForEach(benchmark::State& state)
    BM_Iteration_ForEachOnly(state, *container);
 }
 
+
+//////////////////////////////////////////////////////////////////////////
+template<typename TContainer>
+void BM_Iteration_ForEachOnly(benchmark::State& state, TContainer& container)
+{
+   for (auto _ : state)
+   {
+      volatile uint64_t checksum = 0;
+      container.ForEach([&checksum](typename TContainer::KeyType id, const typename TContainer::ValueType& value)
+      {
+         checksum += value;
+      });
+   }
+}
+
+template<typename TContainer>
+void BM_Iteration_ForEach(benchmark::State& state, const size_t count, const float fillRatio)
+{
+   auto container = std::make_unique<TContainer>();
+
+   SetupRandom(*container, count, fillRatio);
+      
+   BM_Iteration_ForEachOnly(state, *container);
+}
+
+template<typename TContainer>
+void BM_Iteration_ForEach(benchmark::State& state)
+{
+   const float fillRatio = static_cast<float>(state.range(0)) / 100.0f;
+   const size_t count = static_cast<size_t>(state.range(1));
+
+   BM_Iteration_ForEach<TContainer>(state, count, fillRatio);
+}
+
+
 #undef ARGS
 #define ARGS ->ArgsProduct({{0, 25, 50, 75, 100}, {1000000}})->Unit(benchmark::kMicrosecond)
 MY_BENCHMARK(BM_Iteration, SlotMapContainer<BenchmarkValue<>>, SlotMap);
 MY_BENCHMARK(BM_Iteration_ForEach, SlotMapContainer<BenchmarkValue<>>, SlotMap);
+MY_BENCHMARK(BM_Iteration_Iterator, SlotMapContainer<BenchmarkValue<>>, SlotMap);
 using SlotMapContainerStdBitset = SlotMapContainer<BenchmarkValue<>, slotmap::StdBitSetTraits>;
 MY_BENCHMARK(BM_Iteration, SlotMapContainerStdBitset, SlotMapStdBitset);
+MY_BENCHMARK(BM_Iteration, FixedSlotMapContainer1000000, FixedSlotMap);
+MY_BENCHMARK(BM_Iteration_ForEach, FixedSlotMapContainer1000000, FixedSlotMap);
+MY_BENCHMARK(BM_Iteration_Iterator, FixedSlotMapContainer1000000, FixedSlotMap);
 MY_BENCHMARK(BM_Iteration, StdUnorderedMapContainer<BenchmarkValue<>>, UnorderedMap);
 MY_BENCHMARK(BM_Iteration, VectorWithFreelist<BenchmarkValue<>>, Vector);
 MY_BENCHMARK(BM_Iteration, ColonyContainer<BenchmarkValue<>>, Colony);

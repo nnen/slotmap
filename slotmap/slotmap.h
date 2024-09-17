@@ -38,13 +38,37 @@ namespace slotmap {
 
 
 //////////////////////////////////////////////////////////////////////////
+constexpr int CountLeadingZeros(unsigned int value)
+{
+   constexpr int bits = std::numeric_limits<unsigned int>::digits;
+
+   if (value == 0)
+   {
+      return bits;
+   }
+
+   unsigned int mask = (1 << (bits - 1));
+   for (int i = 0; i < bits - 1; ++i, mask >>= 1)
+   {
+      if (value & mask)
+      {
+         return i;
+      }
+   }
+   
+   return bits;
+}
+
+
+//////////////////////////////////////////////////////////////////////////
 /**
  * Returns the number of bits required to represent the given number of
  * elements.
  */
-constexpr int GetIndexBitSize(int arraySize)
+constexpr int GetIndexBitSize(unsigned int arraySize)
 {
-   return ((arraySize <= 2) ? 1 : 1 + GetIndexBitSize(arraySize >> 1));
+   return std::numeric_limits<unsigned int>::digits - CountLeadingZeros(arraySize);
+   //return ((arraySize <= 2) ? 1 : 1 + GetIndexBitSize(arraySize >> 1));
 }
 
 
@@ -61,30 +85,56 @@ template<
 {
    using ValueType = TValue;
    using KeyType = TKey;
-   using GenerationType = uint8_t;
+   //using GenerationType = uint8_t;
+
+   using ReferenceType = ValueType&;
+   using ConstReferenceType = const ValueType&;
 
    using SizeType = size_t;
    using IndexType = ptrdiff_t;
 
    using BitsetType = typename TBitsetTraits::template BitsetType<TCapacity>;
 
-   static_assert(std::is_unsigned_v<KeyType>);
-   static_assert(sizeof(GenerationType) < sizeof(KeyType));
-
-   static constexpr size_t StaticCapacity = TCapacity;
+   static constexpr size_t  StaticCapacity = TCapacity;
    static constexpr KeyType InvalidKey = static_cast<KeyType>(-1);
 
-   static constexpr KeyType GenerationBitSize = sizeof(GenerationType) * CHAR_BIT;
-   static constexpr KeyType SlotIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize;
+   static constexpr int KeyBitSize = static_cast<int>(sizeof(KeyType) * CHAR_BIT);
+   static constexpr int SlotIndexBitSize = GetIndexBitSize(StaticCapacity + 1);
+   static_assert(SlotIndexBitSize > 0, "SlotIndexBitSize must be greater than 0.");
+   static_assert(SlotIndexBitSize < KeyBitSize, "SlotIndexBitSize must be greater than 0.");
 
-   static constexpr KeyType MaxSlotCount = (static_cast<KeyType>(1) << SlotIndexBitSize);
-   static constexpr KeyType SlotIndexMask = MaxSlotCount - 1;
+   static constexpr int GenerationBitSize = KeyBitSize - SlotIndexBitSize;
+   static_assert(GenerationBitSize > 0, "GenerationBitSize must be greater than 0.");
+   
+   static constexpr KeyType SlotIndexMask = (static_cast<KeyType>(1) << SlotIndexBitSize) - 1;
+   static_assert(SlotIndexMask > StaticCapacity, "SlotIndexMask must be greater than StaticCapacity.");
 
    static constexpr KeyType GenerationShift = SlotIndexBitSize;
-   static constexpr KeyType GenerationMask = (1 << GenerationBitSize) - 1;
+   static constexpr KeyType GenerationMask = (static_cast<KeyType>(1) << GenerationBitSize) - 1;
 
-   static_assert(MaxSlotCount > TCapacity, "The key type is too small for the given capacity.");
+   using GenerationType = std::conditional_t<GenerationBitSize <= 8, uint8_t,
+      std::conditional_t<GenerationBitSize <= 16, uint16_t,
+      std::conditional_t<GenerationBitSize <= 32, uint32_t,
+      uint64_t>>>;
 
+   static_assert(std::is_unsigned_v<KeyType>);
+   static_assert(sizeof(GenerationType) <= sizeof(KeyType));
+
+   //static constexpr size_t  StaticCapacity = TCapacity;
+   //static constexpr KeyType InvalidKey = static_cast<KeyType>(-1);
+
+   //static constexpr KeyType GenerationBitSize = sizeof(GenerationType) * CHAR_BIT;
+   //static constexpr KeyType SlotIndexBitSize = (sizeof(TKey) * CHAR_BIT) - GenerationBitSize;
+
+   //static constexpr KeyType MaxSlotCount = (static_cast<KeyType>(1) << SlotIndexBitSize);
+   //static constexpr KeyType SlotIndexMask = MaxSlotCount - 1;
+
+   //static constexpr KeyType GenerationShift = SlotIndexBitSize;
+   //static constexpr KeyType GenerationMask = (1 << GenerationBitSize) - 1;
+
+   //static_assert(MaxSlotCount > TCapacity, "The key type is too small for the given capacity.");
+
+private:
    struct Slot
    {
       union
@@ -97,9 +147,59 @@ template<
       inline const TValue* GetPtr() const { return reinterpret_cast<const TValue*>(m_storage); }
    };
 
-   class Iterator
+public:
+   template<bool IsConst>
+   class IteratorTpl
    {
+      friend class FixedSlotMapStorage;
+
+   public:
+      using StoragePtr = std::conditional_t<IsConst, const FixedSlotMapStorage*, FixedSlotMapStorage*>;
+      using ReferenceType = std::conditional_t<IsConst, const ValueType&, ValueType&>;
+      using PointerType = std::conditional_t<IsConst, const ValueType*, ValueType*>;
+
+      IteratorTpl() = default;
+
+   private:
+      constexpr IteratorTpl(StoragePtr storage, KeyType key) : m_storage(storage), m_key(key) {}
+      constexpr IteratorTpl(StoragePtr storage) : m_storage(storage) {}
+   
+   public:
+      
+      inline bool operator==(const IteratorTpl& other) const { return m_key == other.m_key; }
+      inline bool operator!=(const IteratorTpl& other) const { return m_key != other.m_key; }
+
+      inline IteratorTpl& operator++() { Advance(); return *this; }
+      
+      inline KeyType GetKey() const { return m_key; }
+      inline PointerType GetPtr() const { return m_ptr; }
+      
+      bool Advance()
+      {
+         ++m_key;
+         return FindNext();
+      }
+   
+   private:
+      bool FindNext()
+      {
+         if (!m_storage->FindNextKey(m_key))
+         {
+            m_key = std::numeric_limits<KeyType>::max();
+            m_ptr = nullptr;
+            return false;
+         }
+         m_ptr = m_storage->GetPtr(m_key);
+         return true;
+      }
+
+      StoragePtr m_storage = nullptr;
+      KeyType m_key = std::numeric_limits<KeyType>::max();
+      PointerType m_ptr = nullptr;
    };
+
+   using Iterator = IteratorTpl<false>;
+   using ConstIterator = IteratorTpl<true>;
 
    FixedSlotMapStorage();
    FixedSlotMapStorage(const FixedSlotMapStorage&);
@@ -121,7 +221,9 @@ template<
 
    inline TValue* GetPtr(TKey key) { return GetPtrTpl(this, key); }
    inline const TValue* GetPtr(TKey key) const { return GetPtrTpl(this, key); }
-
+   
+   TKey GetKeyByIndex(size_t index) const;
+   
    bool FindNextKey(TKey& key) const;
    TKey IncrementKey(TKey key) const;
 
@@ -133,6 +235,12 @@ template<
 
    void Swap(FixedSlotMapStorage& other);
    void Clear();
+   
+   Iterator Begin() { Iterator it(this, 0); it.FindNext(); return it; }
+   constexpr Iterator End() { return Iterator(this); }
+   
+   ConstIterator Begin() const { ConstIterator it(this, 0); it.FindNext(); return it; }
+   constexpr ConstIterator End() const { return ConstIterator(this); }
 
 private:
    SizeType m_size = 0;
@@ -281,24 +389,51 @@ struct ChunkedSlotMapStorage
    template<bool IsConst>
    class IteratorTpl
    {
+      friend class ChunkedSlotMapStorage;
+
    public:
+      using StoragePtr = std::conditional_t<IsConst, const ChunkedSlotMapStorage*, ChunkedSlotMapStorage*>;
       using ReferenceType = std::conditional_t<IsConst, const ValueType&, ValueType&>;
-      using PointerType = std::conditional_t<IsConst, const ValueType*, ValueType*>;   
-      
-      inline IteratorTpl(ChunkedSlotMapStorage* storage) : m_storage(storage) {}
+      using PointerType = std::conditional_t<IsConst, const ValueType*, ValueType*>;
 
-      bool operator==(const IteratorTpl& other) const;
-      bool operator!=(const IteratorTpl& other) const;
-
-      IteratorTpl& operator++();
-      IteratorTpl& operator++(int);
+      IteratorTpl() = default;
 
    private:
-      using SlotType = std::conditional_t<IsConst, const Slot, Slot>;
+      constexpr IteratorTpl(StoragePtr storage, KeyType key) : m_storage(storage), m_key(key) {}
+      constexpr IteratorTpl(StoragePtr storage) : m_storage(storage) {}
 
-      ChunkedSlotMapStorage* m_storage = nullptr;
-      IndexType m_chunkIndex = 0;
-      IndexType m_slotIndex = 0;
+   public:
+      
+      inline bool operator==(const IteratorTpl& other) const { return m_key == other.m_key; }
+      inline bool operator!=(const IteratorTpl& other) const { return m_key != other.m_key; }
+
+      inline IteratorTpl& operator++() { Advance(); return *this; }
+      
+      inline KeyType GetKey() const { return m_key; }
+      inline PointerType GetPtr() const { return m_ptr; }
+      
+      bool Advance()
+      {
+         m_key = m_storage->IncrementKey(m_key);
+         return FindNext();
+      }
+   
+   private:
+      bool FindNext()
+      {
+         if (!m_storage->FindNextKey(m_key))
+         {
+            m_key = std::numeric_limits<KeyType>::max();
+            m_ptr = nullptr;
+            return false;
+         }
+         m_ptr = m_storage->GetPtr(m_key);
+         return true;
+      }
+
+      StoragePtr m_storage = nullptr;
+      KeyType m_key = std::numeric_limits<KeyType>::max();
+      PointerType m_ptr = nullptr;
    };
    using Iterator = IteratorTpl<false>;
    using ConstIterator = IteratorTpl<true>;
@@ -336,10 +471,16 @@ struct ChunkedSlotMapStorage
    void Swap(ChunkedSlotMapStorage& other);
    void Clear();
 
+   Iterator Begin() { Iterator it(this, 0); it.FindNext(); return it; }
+   constexpr Iterator End() { return Iterator(this); }
+   
+   ConstIterator Begin() const { ConstIterator it(this, 0); it.FindNext(); return it; }
+   constexpr ConstIterator End() const { return ConstIterator(this); }
+
+private:
    using ChunkAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk>;
    using ChunkPtrAllocator = typename std::allocator_traits<TAllocator>::template rebind_alloc<Chunk*>;
 
-private:
    SizeType m_size = 0;
    IndexType m_firstFreeChunk = -1;
    SizeType m_maxUsedChunk = 0;
@@ -356,6 +497,7 @@ public:
    using KeyType = typename TStorage::KeyType;
    using SizeType = typename TStorage::SizeType;
    using Iterator = typename TStorage::Iterator;
+   using ConstIterator = typename TStorage::ConstIterator;
 
    static constexpr KeyType InvalidKey = TStorage::InvalidKey;
 
@@ -512,6 +654,12 @@ public:
     */
    template<typename TFunc>
    inline void ForEach(TFunc func) const { m_storage.ForEachSlot(func); }
+   
+   inline Iterator Begin() { return m_storage.Begin(); }
+   constexpr inline Iterator End() { return m_storage.End(); }
+   
+   inline ConstIterator Begin() const { return m_storage.Begin(); }
+   constexpr inline ConstIterator End() const { return m_storage.End(); }
 
 private:
    TStorage m_storage;
