@@ -24,6 +24,8 @@ For more information about slotmap as a concept, see:
 This implementation is work in progress. Known features missing are:
 
  * STL-style iterators.
+ * Make the FixedBitSet implementation as close to being a drop-in replacement
+   for std::bitset as possible.
 
 ## Source
 

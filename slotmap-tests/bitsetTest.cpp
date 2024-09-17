@@ -112,6 +112,11 @@ TYPED_TEST(BitsetTest, Bits)
    bitset.set(63);
    indexes.push_back(63); 
 
+   std::bitset<1024> stdBitset;
+   stdBitset.set(0);
+   stdBitset.set(32);
+   stdBitset.set(63);
+
    EXPECT_TRUE(TestFixture::CheckBitset(bitset, indexes));
 }
 

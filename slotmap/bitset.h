@@ -31,7 +31,8 @@ inline int CountTrailingZeros(uint64_t x)
 
 //////////////////////////////////////////////////////////////////////////
 /**
- * This is a fixed bitset implementation very similar to `std::bitset`, but with a few improvements.
+ * This is a fixed bitset implementation very similar to `std::bitset`, but
+ * with support for fast iteration over set bits using builtin functions.
  *
  * The main reason for a custom implementation is that standard `std::bitset`
  * doesn't support fast iteration over set bits using a built-in function like
@@ -44,10 +45,15 @@ template<size_t TSize, typename TWord = uintptr_t>
 class FixedBitset
 {
 public:
-   static_assert(std::is_unsigned_v<TWord>);
+   static_assert(std::is_unsigned_v<TWord>, "The word type must be an unsigned integer type.");
+
+   using WordType = TWord;
 
    static constexpr size_t StaticSize = TSize;
-   
+   static constexpr size_t BitsPerWord = sizeof(TWord) * CHAR_BIT;
+   static constexpr size_t NumWords = (StaticSize + BitsPerWord - 1) / BitsPerWord;
+   static constexpr size_t BitIndexMask = BitsPerWord - 1;
+
    FixedBitset();
    FixedBitset(const FixedBitset& other);
    FixedBitset(FixedBitset&& other);
@@ -57,10 +63,15 @@ public:
 
    inline bool operator[](size_t index) const { return Get(index); }
 
-   bool Get(size_t index) const;
+   inline WordType* Data() { return m_words; }
+   inline const WordType* Data() const { return m_words; }
+
+   constexpr bool Get(size_t index) const;
    void Set(size_t index);
    void Unset(size_t index);
    void Set(size_t index, bool value);
+   void Flip(size_t index);
+   void Flip();
 
    inline size_t FindNextBitSet(size_t start) const;
 
@@ -71,22 +82,23 @@ public:
    void ForEachSetBit(size_t from, size_t to, TFunc func) const;
    
    void Clear();
-   
-   // STL-compatibility functions
-   inline size_t size() const { return StaticSize; }
-   inline bool test(size_t index) const { return Get(index); }
-   inline void set(size_t index) { Set(index); }
-   inline void reset(size_t index) { Unset(index); }
-   inline void reset() { Clear(); }
-
-private:
-   static constexpr size_t BitsPerWord = sizeof(TWord) * CHAR_BIT;
-   static constexpr size_t NumWords = (StaticSize + BitsPerWord - 1) / BitsPerWord;
-   static constexpr size_t BitIndexMask = BitsPerWord - 1;
 
    static constexpr size_t GetWordIndex(size_t index) { return index / BitsPerWord; }
    static constexpr size_t GetBitIndex(size_t index) { return index & BitIndexMask; }
 
+   // STL-compatibility functions
+   // STL Element access
+   inline bool test(size_t index) const { return Get(index); }
+   // STL Capacity
+   inline size_t size() const { return StaticSize; }
+   // STL Modifiers
+   inline void set(size_t index) { Set(index); }
+   inline void reset(size_t index) { Unset(index); }
+   inline void reset() { Clear(); }
+   inline void flip(size_t index) { Flip(index); }
+   inline void flip() { Flip()}
+
+private:
    TWord m_words[NumWords];
 };
 
@@ -193,7 +205,7 @@ FixedBitset<TSize, TWord>& FixedBitset<TSize, TWord>::operator=(FixedBitset&& ot
 
 
 template<size_t TSize, typename TWord>
-bool FixedBitset<TSize, TWord>::Get(size_t index) const
+constexpr bool FixedBitset<TSize, TWord>::Get(size_t index) const
 {
    const size_t wordIndex = index / BitsPerWord;
    assert(wordIndex < NumWords);
@@ -231,6 +243,25 @@ void FixedBitset<TSize, TWord>::Set(size_t index, bool value)
    else
    {
       m_words[wordIndex] &= ~(static_cast<TWord>(1u) << (index & BitIndexMask));
+   }
+}
+
+
+template<size_t TSize, typename TWord>
+void FixedBitset<TSize, TWord>::Flip(size_t index)
+{
+   const size_t wordIndex = index / BitsPerWord;
+   assert(wordIndex < NumWords);
+   m_words[wordIndex] ^= (static_cast<TWord>(1u) << (index & BitIndexMask));
+}
+
+
+template<size_t TSize, typename TWord>
+void FixedBitset<TSize, TWord>::Flip()
+{
+   for (size_t i = 0; i < NumWords; ++i)
+   {
+      m_words[i] = ~m_words[i];
    }
 }
 
