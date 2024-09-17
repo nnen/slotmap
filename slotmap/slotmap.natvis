@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="slotmap::FixedBitset&lt;*&gt;">
+    <DisplayString>{{size = {StaticSize}, words = {NumWords}}</DisplayString>
+    <Expand>
+      <Item Name="[size]" ExcludeView="simple">StaticSize</Item>
+      <Item Name="[capacity]" ExcludeView="simple">NumWords * BitsPerWord</Item>
+      <Item Name="[words]" ExcludeView="simple">NumWords</Item>
+      <CustomListItems ExcludeView="words">
+        <Variable Name="iWord" InitialValue="0" />
+        <Variable Name="iBit" InitialValue="0" />
+        <Variable Name="i" InitialValue="0" />
+        <Loop>
+          <Break Condition="iWord >= NumWords"/>
+          <Exec>iBit = 0</Exec>
+          <Loop>
+            <Break Condition="(i >= StaticSize) || (i >= BitsPerWord)"/>
+            <Item Name="[{i}]">(WordType)((m_words[iWord] &amp; ((WordType)(1) &lt;&lt; iBit)) ? 1 : 0)</Item>
+            <Exec>iBit += 1</Exec>
+            <Exec>i += 1</Exec>
+          </Loop>
+          <Exec>iWord += 1</Exec>
+        </Loop>
+      </CustomListItems>
+      <CustomListItems IncludeView="words">
+        <Variable Name="iWord" InitialValue="0" />
+        <Variable Name="iBit" InitialValue="0" />
+        <Loop>
+          <Break Condition="iWord >= NumWords"/>
+          <Item Name="[{iWord}, {iWord * BitsPerWord}]">m_words[iWord],b</Item>
+          <Exec>iWord += 1</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+
+  <Type Name="slotmap::SlotMap&lt;*&gt;">
+    <DisplayString>{m_storage}</DisplayString>
+    <Expand>
+      <ExpandedItem>m_storage</ExpandedItem>
+    </Expand>
+  </Type>
+  
+  <Type Name="slotmap::FixedSlotMapStorage&lt;*&gt;">
+    <DisplayString>{{size = {m_size}}</DisplayString>
+    <Expand>
+      <Item Name="[size]">m_size</Item>
+      <Item Name="[capacity]">StaticCapacity</Item>
+      <CustomListItems>
+        <Variable Name="i" InitialValue="0" />
+        <Variable Name="iWord" InitialValue="0" />
+        <Variable Name="iBit" InitialValue="0" />
+        <Variable Name="BitsPerWord" InitialValue="sizeof(m_liveBits.m_words[0]) * 8" />
+        <Variable Name="key" InitialValue="(KeyType)0" />
+        <Loop>
+          <Break Condition="i >= m_maxUsedSlot" />
+          <Exec>iWord = (size_t)(i) / BitsPerWord</Exec>
+          <Exec>iBit = i - (iWord * BitsPerWord)</Exec>
+          <If Condition="m_liveBits.m_words[iWord] &amp; ((unsigned long long)1 &lt;&lt; iBit)">
+            <Exec>key = (KeyType)(((KeyType)m_generations[i] &lt;&lt; GenerationShift) | (KeyType)i)</Exec>
+            <!-- <Item Name="[{(((KeyType)m_generations[i] &lt;&lt; GenerationShift) | (KeyType)i)}]">*(ValueType*)m_slots[i].m_storage</Item> -->
+            <Item Name="[{key}]">*(ValueType*)m_slots[i].m_storage</Item>
+          </If>
+          <Exec>i += 1</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+
+  <Type Name="slotmap::ChunkedSlotMapStorage&lt;*&gt;">
+    <DisplayString>{{size = {m_size}}</DisplayString>
+    <Expand>
+      <Item Name="[size]" ExcludeView="simple">m_size</Item>
+      <CustomListItems>
+        <Variable Name="iChunk" InitialValue="0" />
+        <Variable Name="iSlot" InitialValue="0" />
+        <Variable Name="iWord" InitialValue="0" />
+        <Variable Name="iBit" InitialValue="0" />
+        <Variable Name="BitsPerWord" InitialValue="sizeof(m_chunks[0]->m_liveBits.m_words[0]) * 8" />
+
+        <Loop>
+          <Break Condition="iChunk >= m_maxUsedChunk" />
+          <Exec>iSlot = 0</Exec>
+          <Loop>
+            <Break Condition="iSlot >= ChunkSlots" />
+            <Exec>iWord = (size_t)iSlot / BitsPerWord</Exec>
+            <Exec>iBit = iSlot - (iWord * BitsPerWord)</Exec>
+            <If Condition="m_chunks[iChunk]->m_liveBits.m_words[iWord] &amp; ((unsigned long long)1 &lt;&lt; iBit)">
+              <Item Name="[{iChunk}, {iSlot}]">*(ValueType*)m_chunks[iChunk]->m_slots[iSlot].m_storage</Item>
+            </If>
+            <Exec>iSlot += 1</Exec>
+          </Loop>
+          <Exec>iChunk += 1</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+</AutoVisualizer>
