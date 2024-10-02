@@ -59,7 +59,7 @@ FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FixedSlotMapStorage(const
    , m_maxUsedSlot(other.m_maxUsedSlot)
    , m_liveBits(other.m_liveBits)
 {
-   for (size_t i = 0; i < m_maxUsedSlot; ++i)
+   for (SizeType i = 0; i < static_cast<SizeType>(m_maxUsedSlot); ++i)
    {
       m_generations[i] = other.m_generations[i];
       if (other.m_liveBits.test(i))
@@ -112,7 +112,7 @@ FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>& FixedSlotMapStorage<TValu
 
    memcpy(m_generations, other.m_generations, sizeof(m_generations));
 
-   for (size_t i = 0; i < other.m_maxUsedSlot; ++i)
+   for (SizeType i = 0; i < static_cast<SizeType>(other.m_maxUsedSlot); ++i)
    {
       if (other.m_liveBits.test(i))
       {
@@ -168,7 +168,7 @@ auto FixedSlotMapStorage<TValue, TKey, Capacity, TBitset>::GetPtrTpl(TSelf self,
    using ReturnType = decltype(self->m_slots[0].GetPtr());
 
    const SizeType slotIndex = static_cast<SizeType>(key & SlotIndexMask);
-   if ((slotIndex >= self->m_maxUsedSlot) || !self->m_liveBits.test(slotIndex))
+   if ((slotIndex >= static_cast<SizeType>(self->m_maxUsedSlot)) || !self->m_liveBits.test(slotIndex))
    {
       return static_cast<ReturnType>(nullptr);
    }
@@ -191,7 +191,7 @@ template<
    typename TBitsetTraits>
 TKey FixedSlotMapStorage<TValue, TKey, TCapacity, TBitsetTraits>::GetKeyByIndex(size_t index) const
 {
-   if (index >= m_maxUsedSlot)
+   if (index >= static_cast<size_t>(m_maxUsedSlot))
    {
       return InvalidKey;
    }
@@ -226,7 +226,7 @@ template<
 bool FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FindNextKey(TKey& key) const
 {
    const TKey slotIndex = static_cast<TKey>(TBitset::template FindNextBitSet(m_liveBits, key & SlotIndexMask));
-   if (slotIndex >= m_maxUsedSlot)
+   if (slotIndex >= static_cast<TKey>(m_maxUsedSlot))
    {
       return false;
    }
@@ -324,7 +324,7 @@ template<
 bool FixedSlotMapStorage<TValue, TKey, TCapacity, TBitset>::FreeSlot(KeyType key)
 {
    const SizeType slotIndex = static_cast<SizeType>(key & SlotIndexMask);
-   if ((slotIndex >= m_maxUsedSlot) || !m_liveBits.test(slotIndex))
+   if ((slotIndex >= static_cast<SizeType>(m_maxUsedSlot)) || !m_liveBits.test(slotIndex))
    {
       return false;
    }
@@ -623,7 +623,7 @@ TKey ChunkedSlotMapStorage<TValue, TKey, MaxChunkSize, TAllocator, TBitsetTraits
 
    return (static_cast<KeyType>(chunk.m_generations[slotIndex]) << GenerationShift) |
       (static_cast<KeyType>(slotIndex) << SlotIndexShift) |
-      chunkIndex;
+      static_cast<KeyType>(chunkIndex);
 }
 
 
