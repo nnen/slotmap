@@ -1,5 +1,7 @@
 // Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
 
+#include "test_common.h"
+
 #include <slotmap/bitset.h>
 
 #include <gtest/gtest.h>
@@ -83,10 +85,23 @@ public:
 };
 
 
+struct BitsetTestNameGenerator {
+   template <typename T>
+   static std::string GetName(int i) 
+   {
+      using BitsetType = T;
+
+      std::stringstream ss;
+      ss << BitsetType::StaticSize;
+      return ss.str();
+   }
+};
+
+
 using BitsetTestTypes = ::testing::Types<
    FixedBitset<64>,
    FixedBitset<1024>>;
-TYPED_TEST_SUITE(BitsetTest, BitsetTestTypes);
+TYPED_TEST_SUITE(BitsetTest, BitsetTestTypes, BitsetTestNameGenerator);
 
 
 TYPED_TEST(BitsetTest, Empty)

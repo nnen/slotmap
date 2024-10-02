@@ -1,6 +1,6 @@
 // Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
 
-#include "testsCommon.h"
+#include "test_common.h"
 
 #include <slotmap/slotmap.h>
 
@@ -15,132 +15,8 @@
 using namespace slotmap;
 
 
-//////////////////////////////////////////////////////////////////////////
-struct TestValueType
-{
-   static constexpr uint32_t Sentinel_DefaultCtor = 0xCAFEBABEu;
-   static constexpr uint32_t Sentinel_Ctor = 0xBEEFBABEu;
-   static constexpr uint32_t Sentinel_CopyCtor = 0xBEEFBEEFu;
-   static constexpr uint32_t Sentinel_MoveCtor = 0xBABEB00B;
-   static constexpr uint32_t Sentinel_Dtor = 0xDEADBABEu;
-   static constexpr uint32_t Sentinel_Moved = 0xDEADFA11u;
-   
-   TestValueType() { ++s_ctorCount; }
-   TestValueType(int32_t value) 
-      : m_value(value)
-      , m_sentinel(Sentinel_Ctor) 
-   { 
-      ++s_ctorCount; 
-   }
-   TestValueType(size_t value)
-      : m_value(static_cast<int32_t>(value))
-      , m_sentinel(Sentinel_Ctor)
-   {
-      ++s_ctorCount;
-   }
-   TestValueType(const TestValueType& other) 
-      : m_value(other.m_value)
-      , m_sentinel(Sentinel_CopyCtor) 
-   { 
-      ++s_ctorCount;
-   }
-   TestValueType(TestValueType&& other) 
-      : m_value(other.m_value)
-      , m_sentinel(Sentinel_MoveCtor) 
-   { 
-      other.m_sentinel = Sentinel_Moved; 
-      ++s_ctorCount; 
-   }
-   ~TestValueType() 
-   {
-      assert(IsValid());
-      m_sentinel = Sentinel_Dtor;
-      ++s_dtorCount;
-   }
-   
-   inline TestValueType& operator=(const TestValueType& other) { m_value = other.m_value; return *this; }
-   inline TestValueType& operator=(TestValueType&& other) { m_value = other.m_value; other.m_sentinel = Sentinel_Moved; return *this; }
-   
-   inline bool operator==(const TestValueType& other) const { return m_value == other.m_value; }
-   inline bool operator!=(const TestValueType& other) const { return m_value != other.m_value; }
-   
-   inline bool IsValid() const 
-   { 
-      return (m_sentinel == Sentinel_Ctor) ||
-         (m_sentinel == Sentinel_DefaultCtor) ||
-         (m_sentinel == Sentinel_CopyCtor) ||
-         (m_sentinel == Sentinel_MoveCtor) ||
-         (m_sentinel == Sentinel_Moved);
-   }
-   inline bool IsDestroyed() const { return m_sentinel == Sentinel_Dtor; }
-
-   static void ResetCounters() 
-   { 
-      s_ctorCount = 0; 
-      s_dtorCount = 0; 
-   }
-
-   static ::testing::AssertionResult CheckLiveInstances(size_t expectedCount)
-   {
-      if (s_dtorCount > s_ctorCount)
-      {
-         return ::testing::AssertionFailure() << "Destructor count " << s_dtorCount << " exceeds constructor count " << s_ctorCount;
-      }
-      const size_t liveCount = s_ctorCount - s_dtorCount;
-      if (liveCount != expectedCount)
-      {
-         return ::testing::AssertionFailure() << "Live instance count " << liveCount << " does not match expected count " << expectedCount;
-      }
-      return ::testing::AssertionSuccess();
-   }
-
-   int32_t m_value = 0;
-   uint32_t m_sentinel = Sentinel_DefaultCtor;
-   
-   static size_t s_ctorCount;
-   static size_t s_dtorCount;
-};
-
-
-inline std::ostream& operator<<(std::ostream& os, const TestValueType& value)
-{
-   return os << value.m_value;
-}
-
-inline bool operator==(const TestValueType& value, int32_t i) { return value.m_value == i; }
-inline bool operator==(int32_t i, const TestValueType& value) { return value.m_value == i; }
-inline bool operator!=(const TestValueType& value, int32_t i) { return !(value == i); }
-inline bool operator!=(int32_t i, const TestValueType& value) { return !(value == i); }
-
-
 size_t TestValueType::s_ctorCount = 0;
 size_t TestValueType::s_dtorCount = 0;
-
-
-//////////////////////////////////////////////////////////////////////////
-template<typename T>
-struct TypeNameTraits
-{
-   static void Get(std::ostream& out)
-   {
-      if constexpr (std::is_integral_v<T>)
-      {
-         if constexpr (std::is_unsigned_v<T>)
-         {
-            out << "u";
-         }
-         else
-         {
-            out << "i";
-         }
-         out << sizeof(T) * CHAR_BIT;
-      }
-      else
-      {
-         out << "?";
-      }
-   }
-};
 
 
 template<typename T>
@@ -270,6 +146,7 @@ public:
 
    ::testing::AssertionResult SetUpTestData(MapType& map, Pairs& values, size_t count, float fillRate)
    {
+      Keys keys;
       for (size_t i = 0; i < count; ++i)
       {
          ValueType value = static_cast<ValueType>(m_valueCounter++);
@@ -279,7 +156,56 @@ public:
             return ::testing::AssertionFailure() << "Key " << key << " already exists";
          }
          values[key] = value;
+         keys.push_back(keys);
       }
+      for (auto key : keys)
+      {
+         if (randf() < fillRate)
+         {
+            map.Erase(key);
+            values.erase(key);
+         }
+      }
+      return ::testing::AssertionSuccess();
+   }
+
+   ::testing::AssertionResult SetUpTestDataA(MapType& map, Pairs& values)
+   {
+      const size_t count = MaxSize >> 1;
+      std::vector<KeyType> keys;
+
+      for (size_t i = 0; i < count; ++i)
+      {
+         ValueType value = static_cast<ValueType>(m_valueCounter++);
+         KeyType key{};
+         ASSERT_R(Emplace(value, key, map, values));
+         keys.push_back(key);
+      }
+
+      // First slot empty
+      ASSERT_R(EraseValid(keys[0], map, values));
+
+      // One slot empty
+      ASSERT_R(EraseValid(keys[7], map, values));
+
+      // 16 consecutive slots empty
+      for (size_t i = 16; (i < 32) && (i < count); ++i)
+      {
+         ASSERT_R(EraseValid(keys[i], map, values));
+      }
+
+      // 64 consecutive slots empty aligned to 64
+      for (size_t i = 64; (i < 128) && (i < count); ++i)
+      {
+         ASSERT_R(EraseValid(keys[i], map, values));
+      }
+
+      // 64 consecutive slots empty not aligned to 64
+      for (size_t i = 160; (i < 224) && (i < count); ++i)
+      {
+         ASSERT_R(EraseValid(keys[i], map, values));
+      }
+
       return ::testing::AssertionSuccess();
    }
    
@@ -449,36 +375,46 @@ public:
    
    ::testing::AssertionResult Emplace(const ValueType& value, KeyType& outKey)
    {
-      outKey = m_map1.Emplace(value);
-      if (m_items.count(outKey) != 0)
+      return Emplace(value, outKey, m_map1, m_items);
+   }
+   
+   ::testing::AssertionResult Emplace(const ValueType& value, KeyType& outKey, MapType& map, Pairs& items)
+   {
+      outKey = map.Emplace(value);
+      if (items.count(outKey) != 0)
       {
          return ::testing::AssertionFailure() << "Key " << outKey << " already exists";
       }
-      m_items[outKey] = value;
+      items[outKey] = value;
       return ::testing::AssertionSuccess();
    }
 
    ::testing::AssertionResult EraseValid(KeyType key)
    {
-      if (!m_map1.Erase(key))
+      return EraseValid(key, m_map1, m_items);
+   }
+
+   ::testing::AssertionResult EraseValid(KeyType key, MapType& map, Pairs& items)
+   {
+      if (!map.Erase(key))
       {
          return ::testing::AssertionFailure() << "Failed to erase key " << key;
       }
 
-      if (m_map1.GetPtr(key) != nullptr)
+      if (map.GetPtr(key) != nullptr)
       {
          return ::testing::AssertionFailure() << "Erased key " << key << " still exists";
       }
       
-      if (m_map1.Erase(key))
+      if (map.Erase(key))
       {
          return ::testing::AssertionFailure() << "Erased key " << key << " twice";
       }
       
-      auto it = m_items.find(key);
-      if (it != m_items.end())
+      auto it = items.find(key);
+      if (it != items.end())
       {
-         m_items.erase(it);
+         items.erase(it);
       }
 
       return ::testing::AssertionSuccess();
@@ -491,27 +427,18 @@ public:
 };
 
 
-struct SlotMapTestNameGenerator {
-   template <typename T>
-   static std::string GetName(int i) 
-   {
-      return T::GetName(i);
-   }
-};
-
-
 using SlotMapTestTypes = ::testing::Types<
    SlotMapTestTraits<FixedSlotMap<TestValueType, 64>, 64>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 255, uint16_t>, 255>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 1024>, 1024>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 1024, uint64_t>, 1024>,
-   SlotMapTestTraits<SlotMap<TestValueType, uint16_t>, 128>,
+   SlotMapTestTraits<SlotMap<TestValueType, uint16_t>, SlotMap<TestValueType, uint16_t>::MaxCapacity()>,
    SlotMapTestTraits<SlotMap<TestValueType>, 10000>,
    SlotMapTestTraits<SlotMap<TestValueType>, 1000000>,
-   SlotMapTestTraits<SlotMap<TestValueType>, 14614082>,
+   SlotMapTestTraits<SlotMap<TestValueType>, SlotMap<TestValueType>::MaxCapacity()>,
    SlotMapTestTraits<SlotMap<TestValueType, uint64_t>, 1000000>
 >;
-TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes, SlotMapTestNameGenerator);
+TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes, TemplateTestNameGenerator);
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -524,13 +451,29 @@ TYPED_TEST(SlotMapTest, CheckMaxCapacity)
 //////////////////////////////////////////////////////////////////////////
 TYPED_TEST(SlotMapTest, Create)
 {
-   typename TestFixture::MapType map;
+   using MapType = typename TestFixture::MapType;
+   MapType map;
    ASSERT_EQ(0, map.Size());
    ASSERT_EQ(map.GetPtr(0), nullptr);
    ASSERT_EQ(map.GetPtr(1), nullptr);
    ASSERT_EQ(map.GetPtr(2), nullptr);
+   ASSERT_EQ(map.GetPtr(MapType::InvalidKey), nullptr);
 
    ASSERT_TRUE(TestValueType::CheckLiveInstances(0));
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, InvalidKey)
+{
+   using MapType = typename TestFixture::MapType;
+   MapType map;
+   ASSERT_EQ(0, map.Size());
+   ASSERT_EQ(map.GetPtr(MapType::InvalidKey), nullptr);
+
+   map.Emplace(123);
+   
+   ASSERT_EQ(map.GetPtr(MapType::InvalidKey), nullptr);
 }
 
 
@@ -757,6 +700,7 @@ TYPED_TEST(SlotMapTest, Overfill)
    for (size_t i = 0; i < Traits::MaxSize; ++i)
    {
       const KeyType key = map.Emplace(static_cast<int>(i));
+      ASSERT_TRUE(key != MapType::InvalidKey);
       keys.insert(key);
    }
 
@@ -820,6 +764,22 @@ TYPED_TEST(SlotMapTest, InsertAndErase)
 
    ASSERT_EQ(0, map.Size());
    ASSERT_TRUE(TestFixture::CheckIteration(map));
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, GetKeyByIndex)
+{
+   ASSERT_TRUE(TestFixture::SetUpTestDataA(this->m_map1, this->m_items));
+
+   for (auto& pair : this->m_items)
+   {
+      const auto index = this->m_map1.GetIndexByKey(pair.first);
+      ASSERT_LT(index, this->m_map1.Capacity());
+      
+      const auto key = this->m_map1.GetKeyByIndex(index);
+      ASSERT_EQ(pair.first, key);
+   }
 }
 
 
@@ -899,7 +859,7 @@ TYPED_TEST(SlotMapTest, Iteration_Empty)
  
 
 //////////////////////////////////////////////////////////////////////////
-TYPED_TEST(SlotMapTest, Iteration)
+TYPED_TEST(SlotMapTest, Iteration_Filled)
 {
    using MapType = typename TestFixture::MapType;
    using KeyType = typename MapType::KeyType;
@@ -907,6 +867,19 @@ TYPED_TEST(SlotMapTest, Iteration)
    using Traits = typename TestFixture::Traits;
 
    ASSERT_TRUE(TestFixture::SetUpTestData(TestFixture::MaxSize));
+   ASSERT_TRUE(TestFixture::CheckIteration());
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+TYPED_TEST(SlotMapTest, Iteration_TestData)
+{
+   using MapType = typename TestFixture::MapType;
+   using KeyType = typename MapType::KeyType;
+   using ValueType = typename MapType::ValueType;
+   using Traits = typename TestFixture::Traits;
+
+   ASSERT_TRUE(TestFixture::SetUpTestDataA(this->m_map1, TestFixture::m_items));
    ASSERT_TRUE(TestFixture::CheckIteration());
 }
 
@@ -921,64 +894,6 @@ TYPED_TEST(SlotMapTest, Iteration_Iterator)
 
    ASSERT_TRUE(TestFixture::SetUpTestData(TestFixture::MaxSize));
    ASSERT_TRUE(TestFixture::CheckIteration_Iterator());
-}
-
-
-//////////////////////////////////////////////////////////////////////////
-template<typename TTraits>
-class GetChunkSizeTest : public testing::Test
-{
-public:
-   using ValueType = typename TTraits::ValueType;
-   using IndexType = typename TTraits::IndexType;
-   using GenerationType = typename TTraits::GenerationType;
-   using BitsetTraits = typename TTraits::BitsetTraits;
-   static constexpr size_t SlotCount = TTraits::SlotCount;
-};
-
-template<typename TValue, typename TIndex, typename TGeneration, typename TBitsetTraits, size_t TSlotCount>
-struct GetChunkSizeTestTraits
-{
-   using ValueType = TValue;
-   using IndexType = TIndex;
-   using GenerationType = TGeneration;
-   using BitsetTraits = TBitsetTraits;
-   static constexpr size_t SlotCount = TSlotCount;
-};
-
-using GetChunkSizeTestTypes = ::testing::Types<
-   GetChunkSizeTestTraits<int, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 64>,
-   GetChunkSizeTestTraits<int, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 128>,
-   GetChunkSizeTestTraits<int, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 256>,
-   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 64>,
-   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 128>,
-   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 256>,
-   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 64>,
-   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 128>,
-   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, FixedBitSetTraits<>, 256>,
-   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, StdBitSetTraits, 64>,
-   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, StdBitSetTraits, 128>,
-   GetChunkSizeTestTraits<uint64_t, ptrdiff_t, uint8_t, StdBitSetTraits, 256>,
-   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, StdBitSetTraits, 64>,
-   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, StdBitSetTraits, 128>,
-   GetChunkSizeTestTraits<TestValueType, ptrdiff_t, uint8_t, StdBitSetTraits, 256>
-   >;
-TYPED_TEST_SUITE(GetChunkSizeTest, GetChunkSizeTestTypes);
-
-TYPED_TEST(GetChunkSizeTest, GetChunkMaxSlots)
-{
-   using ValueType = typename TestFixture::ValueType;
-   using IndexType = typename TestFixture::IndexType;
-   using GenerationType = typename TestFixture::GenerationType;
-   using BitSetTraits = typename TestFixture::BitsetTraits;
-
-   constexpr size_t SlotCount = ::slotmap::GetChunkMaxSlots<
-      ::slotmap::MinChunkSlots, ::slotmap::DefaultMaxChunkSize, ::slotmap::DefaultMaxChunkSize,
-      ValueType, IndexType, GenerationType, BitSetTraits>();
-
-   using ChunkType = ::slotmap::ChunkTpl<SlotCount, ValueType, IndexType, GenerationType, BitSetTraits>;
-   
-   ASSERT_LE(sizeof(ChunkType), ::slotmap::DefaultMaxChunkSize);
 }
 
 
