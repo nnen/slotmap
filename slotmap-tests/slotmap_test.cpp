@@ -1,6 +1,6 @@
 // Copyright (c) 2024, Jan Milik (jan.milik@gmail.com) - All rights reserved.
 
-#include "testsCommon.h"
+#include "test_common.h"
 
 #include <slotmap/slotmap.h>
 
@@ -432,11 +432,10 @@ using SlotMapTestTypes = ::testing::Types<
    SlotMapTestTraits<FixedSlotMap<TestValueType, 255, uint16_t>, 255>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 1024>, 1024>,
    SlotMapTestTraits<FixedSlotMap<TestValueType, 1024, uint64_t>, 1024>,
-   SlotMapTestTraits<SlotMap<TestValueType, uint16_t>, 128>,
+   SlotMapTestTraits<SlotMap<TestValueType, uint16_t>, SlotMap<TestValueType, uint16_t>::MaxCapacity()>,
    SlotMapTestTraits<SlotMap<TestValueType>, 10000>,
    SlotMapTestTraits<SlotMap<TestValueType>, 1000000>,
-   //SlotMapTestTraits<SlotMap<TestValueType>, 14614082>,
-   //SlotMapTestTraits<SlotMap<TestValueType>, SlotMap<TestValueType>::MaxCapacity()>,
+   SlotMapTestTraits<SlotMap<TestValueType>, SlotMap<TestValueType>::MaxCapacity()>,
    SlotMapTestTraits<SlotMap<TestValueType, uint64_t>, 1000000>
 >;
 TYPED_TEST_SUITE(SlotMapTest, SlotMapTestTypes, TemplateTestNameGenerator);
