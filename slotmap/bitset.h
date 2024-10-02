@@ -17,14 +17,30 @@ namespace slotmap {
 
 
 //////////////////////////////////////////////////////////////////////////
-inline int CountTrailingZeros(uint64_t x)
+/**
+ * Counts the number of trailing zeros in an unsigned integer.
+ *
+ * This is equivalent to 0-based index of the least significant bit that is set.
+ */
+template<typename T, std::enable_if_t<std::is_unsigned_v<T>, int> = 0>
+inline int CountTrailingZeros(T x)
 {
 #ifdef _MSC_VER
+   static_assert(sizeof(T) <= sizeof(uint64_t), "Unsupported integer type.");
    unsigned long r;
-   _BitScanForward64(&r, x);
+   if constexpr(sizeof(T) <= sizeof(unsigned long))
+      _BitScanForward(&r, x);
+   else
+      _BitScanForward64(&r, x);
    return static_cast<int>(r);
 #else
-   return __builtin_ctzll(x);
+   static_assert(sizeof(T) <= sizeof(unsigned long long), "Unsupported integer type.");
+   if constexpr(sizeof(T) <= sizeof(unsigned int))
+      return __builtin_ctz(x);
+   else if constexpr(sizeof(T) <= sizeof(unsigned long))
+      return __builtin_ctzl(x);
+   else
+      return __builtin_ctzll(x);
 #endif
 }
 
@@ -32,7 +48,7 @@ inline int CountTrailingZeros(uint64_t x)
 //////////////////////////////////////////////////////////////////////////
 /**
  * This is a fixed bitset implementation very similar to `std::bitset`, but
- * with support for fast iteration over set bits using builtin functions.
+ * with support for fast iteration over set bits using built-in functions.
  *
  * The main reason for a custom implementation is that standard `std::bitset`
  * doesn't support fast iteration over set bits using a built-in function like
